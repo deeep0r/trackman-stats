@@ -66,15 +66,17 @@ var TMSeason = (function () {
       const day = localDate(r.date);
       const inWindow = (!cfg.start || day >= cfg.start) && (!cfg.end || day <= cfg.end);
       const holesN = (r.par || []).length;
-      const players = r.projected ? (r.players || []).filter(p => parts.has(p.name) && p.thru > 0)
-        : (r.players || []).filter(p => parts.has(p.name) && p.scores && p.scores.length === holesN && p.scores.every(x => x != null));
+      const only = r.only || (season.only || {})[r.id] || null;
+      const players = (r.projected ? (r.players || []).filter(p => parts.has(p.name) && p.thru > 0)
+        : (r.players || []).filter(p => parts.has(p.name) && p.scores && p.scores.length === holesN && p.scores.every(x => x != null)))
+        .filter(p => !only || only.includes(p.name));
       const autoOk = inWindow && players.length >= 2;
       const included = r.include === true ? true : r.include === false ? false : autoOk;
       let why = '';
       if (!inWindow) why = 'außerhalb des Saisonzeitraums';
       else if (players.length < 2) why = 'weniger als 2 Teilnehmer mit vollständiger Runde';
       const parTot = (r.par || []).reduce((s, x) => s + x, 0);
-      const rr = { projected: !!r.projected, id: r.id, date: r.date, day, course: r.course, tee: r.tee, holes: holesN, parTot, par: r.par, include: r.include, auto: autoOk, included, why, players: [], match: null, warn: '' };
+      const rr = { only, projected: !!r.projected, id: r.id, date: r.date, day, course: r.course, tee: r.tee, holes: holesN, parTot, par: r.par, include: r.include, auto: autoOk, included, why, players: [], match: null, warn: '' };
       players.forEach(p => { if (r.projected) { rr.players.push({ name: p.name, tee: p.tee, scores: null, gross: p.gross, toPar: p.toPar, thru: p.thru }); return; } const gross = p.scores.reduce((s, x) => s + x, 0); rr.players.push({ name: p.name, tee: p.tee, scores: p.scores, gross, toPar: gross - parTot }); });
       const tees = new Set(rr.players.map(p => p.tee).filter(Boolean));
       const n = rr.players.length;
@@ -282,13 +284,14 @@ var TMSeason = (function () {
       } else body = '<p class="sub">Keine Teilnehmer mit vollständiger Runde.</p>';
       const extra = opts.editor ? opts.editor(r) : '';
       const isOpen = opts.openIds ? opts.openIds.has(r.id) : opts.open;
-      return `<details class="rd" data-id="${esc(r.id)}"${isOpen ? ' open' : ''}><summary><b>${fmtDay(r.day)}</b> ${esc(r.course)} · ${r.players.map(p => esc(p.name)).join(', ') || '–'}<span class="badge${r.included ? '' : ' off'}">${status} · ${esc(src)}</span></summary>${extra}${body}</details>`;
+      const sumNames = r.players.map(p => esc(p.name)).join(', ') + (r.only ? ' <span class="na">(Auswahl)</span>' : '');
+      return `<details class="rd" data-id="${esc(r.id)}"${isOpen ? ' open' : ''}><summary><b>${fmtDay(r.day)}</b> ${esc(r.course)} · ${sumNames || '–'}<span class="badge${r.included ? '' : ' off'}">${status} · ${esc(src)}</span></summary>${extra}${body}</details>`;
     }).join('');
   }
 
   function rulesHTML() {
     return `<details class="rd"><summary><b>Regeln und Rechenweg</b></summary><ul class="sub" style="font-size:13px;line-height:1.5">
-      <li>Es zählen beendete Runden im Saisonzeitraum mit mindestens 2 Teilnehmern, die alle Löcher gespielt haben. Runden lassen sich von Hand aufnehmen oder ausschließen. Spieler außerhalb des Teilnehmerkreises werden ignoriert.</li>
+      <li>Es zählen beendete Runden im Saisonzeitraum mit mindestens 2 Teilnehmern, die alle Löcher gespielt haben. Runden lassen sich von Hand aufnehmen oder ausschließen. Spieler außerhalb des Teilnehmerkreises werden ignoriert. Je Runde lässt sich festlegen, wer mitspielt (z. B. nur 3 von 4 für Split Sixes); nicht ausgewählte Spieler bekommen für diese Runde keine Punkte.</li>
       <li>Platzierung nach Brutto gegen Par. Punkte: 2 Spieler 3/0, 3 Spieler 7/5/3, 4 Spieler 10/7/5/3. Gleichstand: Punkte der belegten Plätze addieren und durch die Anzahl der Spieler teilen (z. B. zwei Zweite bei 4 Spielern: (7+5)/2 = je 6).</li>
       <li>Par-Bonus pro Runde: Runde auf Par +1, unter Par +3. Rundenpunkte = Platzpunkte + Par-Bonus.</li>
       <li>Streichergebnisse je Spieler: bis 3 Runden zählen alle, bei 4 Runden zählen 3, ab 5 Runden zählen 60 % kaufmännisch gerundet (5→3, 6→4, 7→4, 8→5, 10→6). Gewertet werden die Runden mit den meisten Punkten; bei gleichen Punkten die bessere Runde gegen Par, dann die frühere.</li>
@@ -417,6 +420,9 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
   .m-bir { border:1px solid currentColor; border-radius:50%; } .m-eag { border:3px double currentColor; border-radius:50%; }
   .m-bog { border:1px solid currentColor; } .m-dbl { border:3px double currentColor; }
   .dt td.ssc { position:relative; padding:9px 6px; } .ssp { position:absolute; top:2px; right:3px; font-size:10px; font-weight:700; line-height:1; color:var(--text); }
+  .chips { display:flex; flex-wrap:wrap; gap:6px 8px; align-items:center; margin:0 0 10px; }
+  .chip { display:inline-flex; gap:6px; align-items:center; padding:3px 10px; border:1px solid var(--line); border-radius:14px; font-size:13px; color:var(--t2); cursor:pointer; user-select:none; }
+  .chip.on { color:var(--text); border-color:var(--s1); background:color-mix(in srgb, var(--s1) 8%, transparent); } .chip input { margin:0; }
   .pbadge { font-size:12px; font-weight:600; color:#c4560f; background:rgba(235,104,52,.12); padding:2px 9px; border-radius:10px; }
   .dmsg { color:var(--text); background:var(--hl); padding:4px 8px; border-radius:6px; display:inline-block; }
   .sed { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; margin:8px 0; padding:8px 10px; background:var(--surface); border:1px solid var(--line); border-radius:8px; }
@@ -428,7 +434,7 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
   </style>
   <div class="w">
     <div class="top">
-      <h1>Trackman Live <span style="font-weight:400;font-size:12px;color:var(--t2)">v1.9</span></h1>
+      <h1>Trackman Live <span style="font-weight:400;font-size:12px;color:var(--t2)">v1.9.1</span></h1>
       <span class="vtabs"><button data-tab="overview">Übersicht</button><button data-tab="shots">Schlagdaten</button><button data-tab="season">Saison verwalten</button></span>
       <select id="round" title="Runde"></select>
       <label title="Immer die neueste Runde anzeigen"><input type="checkbox" id="follow" checked> neueste</label>
@@ -675,29 +681,42 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
   // ---------- Tageswertung (Matchplay / Split Sixes, brutto) ----------
   const PAIRS = n => [[[n[0], n[1]], [n[2], n[3]]], [[n[0], n[2]], [n[1], n[3]]], [[n[0], n[3]], [n[1], n[2]]]];
   const pairKey = pp => JSON.stringify(pp.map(p => [...p].sort()).sort());
-  function dayPlayers(P) {
+  function basePlayers(P) {
     const parts = SE.season && SE.season.config ? new Set(SE.season.config.participants || []) : null;
     const inSeason = parts ? P.filter(p => parts.has(p.name)) : P;
     return inSeason.length >= 2 ? inSeason : P;
+  }
+  function getOnly(sc) {
+    if (SE.season) { const rr = (SE.season.rounds || []).find(x => x.id === sc.id); const o = (rr && rr.only) || (SE.season.only || {})[sc.id]; if (o) return o; }
+    return (store.get().localOnly || {})[sc.id] || null;
+  }
+  // Spieler der Tageswertung: Teilnehmer der Saison, eingeschränkt auf die Auswahl „Spielen mit“
+  function dayPlayers(P) {
+    const base = basePlayers(P), only = getOnly(S.data || {});
+    const sel = only ? base.filter(p => only.includes(p.name)) : base;
+    return sel.length >= 2 ? sel : base;
   }
   function getPairs(sc) {
     if (SE.season) { const rr = (SE.season.rounds || []).find(x => x.id === sc.id); const pp = (rr && rr.pairings) || (SE.season.pairings || {})[sc.id]; if (pp) return { pairs: pp, src: 'season' }; }
     const loc = (store.get().localPairs || {})[sc.id]; if (loc) return { pairs: loc, src: 'local' };
     return { pairs: null, src: null };
   }
-  async function setPairs(sc, pairs) {
+  // Festlegung je Runde speichern: field 'pairings' (Paarungen) oder 'only' (wer spielt mit); in der Saison, sonst nur lokal
+  async function setRoundField(sc, field, value, what) {
     if (SE.season) {
       const rr = (SE.season.rounds || []).find(x => x.id === sc.id);
-      if (rr) rr.pairings = pairs; else { SE.season.pairings = SE.season.pairings || {}; SE.season.pairings[sc.id] = pairs; }
+      if (rr) rr[field] = value || undefined; else { SE.season[field] = SE.season[field] || {}; if (value) SE.season[field][sc.id] = value; else delete SE.season[field][sc.id]; }
       SE.dirty = true;
-      if (sstore.get().gh) { S.dayMsg = 'Speichere Paarungen …'; render(); try { await seasonSave(); S.dayMsg = 'Paarungen in der Saison gespeichert.'; } catch (e) { S.dayMsg = e.message; } }
-      else S.dayMsg = 'Paarungen geändert, aber nicht gespeichert: Unter „Saison verwalten“ fehlt der GitHub-Token.';
+      if (sstore.get().gh) { S.dayMsg = `Speichere ${what} …`; render(); try { await seasonSave(); S.dayMsg = `${what} in der Saison gespeichert.`; } catch (e) { S.dayMsg = e.message; } }
+      else S.dayMsg = `${what} geändert, aber nicht gespeichert: Unter „Saison verwalten“ fehlt der GitHub-Token.`;
     } else {
-      const lp = store.get().localPairs || {}; lp[sc.id] = pairs; store.set({ localPairs: lp });
-      S.dayMsg = 'Paarungen nur in diesem Browser gemerkt – für die Saison unter „Saison verwalten“ das Passwort eingeben.';
+      const key = field === 'pairings' ? 'localPairs' : 'localOnly', lp = store.get()[key] || {};
+      if (value) lp[sc.id] = value; else delete lp[sc.id]; store.set({ [key]: lp });
+      S.dayMsg = `${what} nur in diesem Browser gemerkt – für die Saison unter „Saison verwalten“ das Passwort eingeben.`;
     }
     render();
   }
+  const setPairs = (sc, pairs) => setRoundField(sc, 'pairings', pairs, 'Paarungen');
   const scoreOfP = p => { const o = {}; p.holes.forEach(h => { if (h.complete) o[h.hole] = h.score; }); return o; };
   const holeCount = sc => Math.max(...sc.playersScorecards.map(ps => Math.max(0, ...ps.holes.map(h => h.holeNumber))), 9) > 9 ? 18 : 9;
   function splitCalc(DP, holes) {
@@ -735,6 +754,8 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
     const scoreTd = p => `<td class="dsc">${p.thru ? `<b>${toPar(p.toPar)}</b> <span class="k">${p.thru < nHoles ? p.thru + ' L.' : p.score}</span>` : '–'}</td>`;
     const head = `<tr><th>Spieler</th><th class="dsc">Score</th>${holes.map(h => `<th>${h}</th>`).join('')}<th class="dst">Stand</th></tr><tr class="par"><td class="k">Par</td><td></td>${holes.map(h => `<td class="k">${par[h] ?? ''}</td>`).join('')}<td></td></tr>`;
     const LEG = `Zeichen: <span class="mk m-eag mk-s">3</span> Eagle oder besser, <span class="mk m-bir mk-s">3</span> Birdie, <span class="mk m-par mk-s">4</span> Par, <span class="mk m-bog mk-s">5</span> Bogey, <span class="mk m-dbl mk-s">6</span> Doppelbogey oder schlechter.`;
+    const BP = basePlayers(P), selNames = new Set(DP.map(p => p.name));
+    const chips = BP.length > 2 ? `<div class="chips"><span class="k">Spielen mit:</span>${BP.map(p => `<label class="chip${selNames.has(p.name) ? ' on' : ''}"><input type="checkbox" data-only="${esc(p.name)}"${selNames.has(p.name) ? ' checked' : ''}><span class="dot" style="background:${COLORS[p.i % 4]}"></span>${esc(p.name)}</label>`).join('')}<span class="k">2 = Matchplay · 3 = Split Sixes · 4 = zwei Matches</span></div>` : '';
     const msg = S.dayMsg ? `<p class="sub dmsg">${esc(S.dayMsg)}</p>` : '';
     const seasonHint = !SE.season ? `<p class="sub">Saison nicht geladen – Paarungen gelten nur in diesem Browser. Unter „Saison verwalten“ das Saison-Passwort eingeben.</p>` : '';
     if (n === 3) {
@@ -743,10 +764,10 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
       const fp = v => TMSeason.fmtPts(v);
       const order = [0, 1, 2].sort((a, b) => tot[b] - tot[a] || a - b);
       const rows = order.map(k => [DP[k], k]).map(([p, k]) => `<tr>${'<td>' + name(p) + '</td>'}${scoreTd(p)}${holes.map(h => { const v = pts[h]; if (!v) return `<td class="ssc">${mk(sc3[k][h], h)}</td>`; const top = v[k] === Math.max(...v) && !v.every(x => x === v[0]); return `<td class="ssc${top ? ' win' : ''}" style="${top ? 'background:color-mix(in srgb, ' + COLORS[p.i % 4] + ' 35%, transparent)' : ''}" title="${sc3[k][h]} Schläge, ${fp(v[k])} Punkte">${mk(sc3[k][h], h)}<span class="ssp">${fp(v[k])}</span></td>`; }).join('')}<td class="dst"><span class="big2">${fp(tot[k])}</span> <span class="k">${played ? rank[k] + '. Platz · ' + day[k] + ' Pkt.' : ''}</span></td></tr>`).join('');
-      return `<div class="mp-head"><h2 style="margin:0">Tageswertung · Split Sixes</h2><span class="sub" style="margin:0">pro Loch 4/2/0 Punkte, Gleichstand geteilt · Tagessieger 2, Zweiter 1, Letzter 0 Saisonpunkte${played < nHoles ? ' (vorläufig)' : ''}</span></div>
+      return chips + `<div class="mp-head"><h2 style="margin:0">Tageswertung · Split Sixes</h2><span class="sub" style="margin:0">pro Loch 4/2/0 Punkte, Gleichstand geteilt · Tagessieger 2, Zweiter 1, Letzter 0 Saisonpunkte${played < nHoles ? ' (vorläufig)' : ''}</span></div>
         <div style="overflow-x:auto"><table class="dt">${head}${rows}</table></div><p class="sub">Mitte: Schläge · klein oben rechts: Split-Sixes-Punkte am Loch · in Spielerfarbe: meiste Punkte am Loch (nicht, wenn alle gleich). Sortiert nach aktuellem Punktestand. ${LEG}</p>${msg}`;
     }
-    if (n !== 2 && n !== 4) return `<h2>Tageswertung</h2><p class="sub">Matchplay gibt es bei 2 oder 4 Spielern, Split Sixes bei 3 – diese Runde hat ${n} Spieler.</p>`;
+    if (n !== 2 && n !== 4) return chips + `<h2>Tageswertung</h2><p class="sub">Matchplay gibt es bei 2 oder 4 Spielern, Split Sixes bei 3 – ausgewählt sind ${n} Spieler. Oben auswählen, wer mitspielt.</p>${msg}`;
     let pairs, sel = '';
     if (n === 2) pairs = [[DP[0].name, DP[1].name]];
     else {
@@ -767,11 +788,17 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
       rows += `<tr><td>${name(Pa)}</td>${scoreTd(Pa)}${holes.map(h => cellM(h, r.sA, 'A', COLORS[Pa.i % 4])).join('')}<td class="dst">${st.A}</td></tr>
         <tr><td>${name(Pb)}</td>${scoreTd(Pb)}${holes.map(h => cellM(h, r.sB, 'B', COLORS[Pb.i % 4])).join('')}<td class="dst">${st.B}</td></tr>`;
     });
-    return `<div class="mp-head"><h2 style="margin:0">Tageswertung · Matchplay</h2><span class="sp"></span>${sel}</div>
+    return chips + `<div class="mp-head"><h2 style="margin:0">Tageswertung · Matchplay</h2><span class="sp"></span>${sel}</div>
       <div style="overflow-x:auto"><table class="dt">${head}${rows}</table></div>
       ${!pairs ? '<p class="sub">Paarungen auslosen oder auswählen – dann zeigt die Tabelle die beiden Matches.</p>' : `<p class="sub">In Spielerfarbe = Loch gewonnen. Sieg 2, Unentschieden 1, Niederlage 0 Saisonpunkte. ${LEG}</p>`}${n === 4 ? seasonHint : ''}${msg}`;
   }
   function bindDay(sc, P) {
+    const BP = basePlayers(P);
+    root.querySelectorAll('#day input[data-only]').forEach(cb => cb.onchange = () => {
+      const on = [...root.querySelectorAll('#day input[data-only]')].filter(x => x.checked).map(x => x.dataset.only);
+      if (on.length < 2) { cb.checked = true; S.dayMsg = 'Mindestens 2 Spieler auswählen.'; render(); return; }
+      setRoundField(sc, 'only', on.length === BP.length ? null : on, 'Spielerauswahl');
+    });
     const DP = dayPlayers(P); if (DP.length !== 4) return;
     const names = DP.map(p => p.name), sel = root.querySelector('#dayPair'), dr = root.querySelector('#dayDraw');
     if (sel) sel.onchange = () => { if (sel.value === '') return; setPairs(sc, PAIRS(names)[+sel.value]); };
@@ -931,9 +958,10 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
       const round = { id: sc.id, date: sc.startedAt, updated: sc.lastUpdatedAt, course: sc.course.displayName.trim(), tee: sc.teeName, holeNos: nos, par: nos.map(parOf),
         players: ps.map(p => ({ name: p.player.name, tee: p.teeName || sc.teeName, scores: nos.map(n => { const h = p.holes.find(x => x.holeNumber === n); return h && h.grossScore != null ? h.grossScore : null; }) })) };
       if (round.players.length < 2) continue;
-      const pre = (SE.season.pairings || {})[s.id];
-      if (ex) { round.include = ex.include; round.pairings = ex.pairings || pre; Object.assign(ex, round); updated++; } else { if (pre) round.pairings = pre; SE.season.rounds.push(round); added++; }
+      const pre = (SE.season.pairings || {})[s.id], preOnly = (SE.season.only || {})[s.id];
+      if (ex) { round.include = ex.include; round.pairings = ex.pairings || pre; round.only = ex.only || preOnly; Object.assign(ex, round); updated++; } else { if (pre) round.pairings = pre; if (preOnly) round.only = preOnly; SE.season.rounds.push(round); added++; }
       if (pre && SE.season.pairings) delete SE.season.pairings[s.id];
+      if (preOnly && SE.season.only) delete SE.season.only[s.id];
     }
     if (added || updated) SE.dirty = true;
     return { added, updated, checked: list.length };
@@ -968,6 +996,8 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
     const editor = r => {
       const rr = raw(r.id); const inc = rr.include === true ? 'yes' : rr.include === false ? 'no' : 'auto';
       let h = `<div class="sed"><label>Zählt <select data-inc="${esc(r.id)}"><option value="auto"${inc === 'auto' ? ' selected' : ''}>automatisch (${r.auto ? 'ja' : 'nein'})</option><option value="yes"${inc === 'yes' ? ' selected' : ''}>ja</option><option value="no"${inc === 'no' ? ' selected' : ''}>nein</option></select></label>`;
+      const cand = (rr.players || []).filter(p => c.participants.includes(p.name) && p.scores && p.scores.every(x => x != null)).map(p => p.name);
+      if (cand.length > 2) h += ` <span class="k">Spielen mit:</span> ${cand.map(nm => `<label class="chip${!rr.only || rr.only.includes(nm) ? ' on' : ''}"><input type="checkbox" data-sonly="${esc(r.id)}" value="${esc(nm)}"${!rr.only || rr.only.includes(nm) ? ' checked' : ''}>${esc(nm)}</label>`).join('')}`;
       if (r.included && r.players.length === 4) {
         const n = r.players.map(p => p.name), opts = PAIRS(n), cur = JSON.stringify((rr.pairings || []).map(p => [...p].sort()).sort());
         const idx = opts.findIndex(o => JSON.stringify(o.map(p => [...p].sort()).sort()) === cur);
@@ -990,6 +1020,10 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
     bindSeasonSettings();
     const mark = () => { SE.dirty = true; renderSeason(); };
     main.querySelectorAll('select[data-inc]').forEach(el => el.onchange = () => { const rr = raw(el.dataset.inc); rr.include = el.value === 'yes' ? true : el.value === 'no' ? false : undefined; mark(); });
+    main.querySelectorAll('input[data-sonly]').forEach(el => el.onchange = () => {
+      const rr = raw(el.dataset.sonly), boxes = [...main.querySelectorAll('input[data-sonly]')].filter(x => x.dataset.sonly === el.dataset.sonly), on = boxes.filter(x => x.checked).map(x => x.value);
+      if (on.length < 2) { el.checked = true; return; }
+      rr.only = on.length === boxes.length ? undefined : on; SE.openIds.add(rr.id); mark(); });
     main.querySelectorAll('select[data-pair]').forEach(el => el.onchange = () => { const rr = raw(el.dataset.pair), r = R.rounds.find(x => x.id === rr.id); rr.pairings = el.value === '' ? undefined : PAIRS(r.players.map(p => p.name))[+el.value]; mark(); });
     main.querySelectorAll('button[data-draw]').forEach(el => el.onclick = () => { const rr = raw(el.dataset.draw), r = R.rounds.find(x => x.id === rr.id); rr.pairings = PAIRS(r.players.map(p => p.name))[Math.floor(Math.random() * 3)]; SE.openIds.add(rr.id); mark(); });
     main.querySelectorAll('.sed').forEach(el => el.addEventListener('click', e => e.stopPropagation()));
