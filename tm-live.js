@@ -94,7 +94,7 @@ var TMSeason = (function () {
           A.mp = res[0]; B.mp = res[1];
           rr.match = { type: 'duel', duels: [{ a: A.name, b: B.name, won: w, pts: res }] };
         } else if (n === 4) {
-          const pairs = (r.pairings || []).filter(pq => pq && pq.length === 2);
+          const pairs = (r.pairings || (season.pairings || {})[r.id] || []).filter(pq => pq && pq.length === 2);
           const names = rr.players.map(p => p.name);
           const valid = pairs.length === 2 && new Set(pairs.flat()).size === 4 && pairs.flat().every(x => names.includes(x));
           if (!valid) rr.match = { type: 'duel', missing: true, duels: [] };
@@ -136,7 +136,7 @@ var TMSeason = (function () {
       const bonus = bestHolders.has(pl.name) ? BEST_ROUND_BONUS : 0;
       const totPar = c.reduce((s, x) => s + x.p.toPar, 0);
       const bestRound = pl.rounds.reduce((m, x) => (m === null || x.p.toPar < m ? x.p.toPar : m), null);
-      return { name: pl.name, played: n, counted: k, struck: n - k, roundPts, bonus, total: roundPts + bonus, mp: pl.mp, totPar: c.length ? totPar : null, avgPar: c.length ? totPar / c.length : null, best: bestRound, rounds: pl.rounds };
+      return { name: pl.name, played: n, counted: k, struck: n - k, roundPts, bonus, einzel: roundPts + bonus, total: roundPts + bonus + pl.mp, mp: pl.mp, totPar: c.length ? totPar : null, avgPar: c.length ? totPar / c.length : null, best: bestRound, rounds: pl.rounds };
     });
     return { config: cfg, rounds: R, included: inc, table, best, bestRounds, rules: { countedRounds } };
   }
@@ -175,28 +175,34 @@ var TMSeason = (function () {
   .tms .titles { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin:6px 0 14px; }
   .tms .titles > div { background:var(--tms-surface); border:1px solid var(--tms-line); border-radius:10px; padding:10px 12px; }
   .tms .titles .k { font-size:12px; color:var(--tms-muted); } .tms .titles .v { font-size:20px; font-weight:650; }
-  .tms .cnt { font-weight:650; } .tms .str { color:var(--tms-muted); text-decoration:line-through; }
+  .tms .cnt { font-weight:650; } .tms .str { color:var(--tms-muted); text-decoration:line-through; } .tms .mpx { color:var(--tms-muted); font-size:12px; }
   .tms .na { color:var(--tms-muted); } .tms .wrap { overflow-x:auto; }
   .tms details.rd { border-top:1px solid var(--tms-line); padding:6px 0; } .tms details.rd summary { cursor:pointer; font-size:14px; }
   .tms .badge { font-size:11px; padding:1px 7px; border-radius:10px; background:var(--tms-surface); border:1px solid var(--tms-line); margin-left:6px; }
   .tms .badge.off { opacity:.7; } .tms .warn { color:#b5541b; font-size:12px; }
   .tms h3 { font-size:15px; margin:18px 0 8px; } .tms .sub { color:var(--tms-muted); font-size:12px; margin:0 0 8px; }`;
 
-  function standingsHTML(S) {
+  function titlesHTML(S) {
     const t = S.table;
-    if (!t.length) return '<p class="sub">Noch keine Teilnehmer.</p>';
     const lead = (f, better) => { const vals = t.filter(x => f(x) != null); if (!vals.length) return null; const b = vals.reduce((m, x) => (m === null || better(f(x), f(m)) ? x : m), null); return vals.filter(x => f(x) === f(b)); };
     const l1 = lead(x => x.played && x.total > 0 ? x.total : null, (a, b) => a > b), l2 = lead(x => x.played && x.mp > 0 ? x.mp : null, (a, b) => a > b), l3 = lead(x => x.best, (a, b) => a < b);
     const names = a => a ? a.map(x => esc(x.name)).join(', ') : '–';
-    let h = `<div class="titles"><div><div class="k">Winter-Tour-Champion (Einzelwertung)</div><div class="v">${names(l1)}</div><div class="k">${l1 ? fmtPts(l1[0].total) + ' Punkte' : ''}</div></div>
+    return `<div class="titles"><div><div class="k">Winter-Tour-Champion (Gesamtpunkte)</div><div class="v">${names(l1)}</div><div class="k">${l1 ? fmtPts(l1[0].total) + ' Punkte' : ''}</div></div>
       <div><div class="k">Matchplay-Champion</div><div class="v">${names(l2)}</div><div class="k">${l2 ? fmtPts(l2[0].mp) + ' Punkte' : ''}</div></div>
       <div><div class="k">Low-Score-Champion (beste Runde)</div><div class="v">${names(l3)}</div><div class="k">${l3 ? fmtPar(l3[0].best) + ' gegen Par' : ''}</div></div></div>`;
-    const cols = [['Spieler', 'name', 's'], ['Einzelwertung', 'total', 'n'], ['davon Runden', 'roundPts', 'n'], ['Bonus beste Runde', 'bonus', 'n'], ['Matchplay', 'mp', 'n'], ['Runden', 'played', 'n'], ['gewertet', 'counted', 'n'], ['gestrichen', 'struck', 'n'], ['Total gegen Par', 'totPar', 'n'], ['Ø gegen Par', 'avgPar', 'n'], ['Beste Runde', 'best', 'n']];
+  }
+
+  // Gesamttabelle. opts.compact: weniger Spalten (Stats-Seite, Live-Übersicht)
+  function standingsHTML(S, opts = {}) {
+    const t = S.table;
+    if (!t.length) return '<p class="sub">Noch keine Teilnehmer.</p>';
+    const full = [['Spieler', 'name', 's', 'Name in Trackman'], ['Gesamt', 'total', 'n', 'Gesamtpunkte = Rundenpunkte (gewertet) + Bonus beste Runde + Matchplay'], ['Rundenpunkte', 'roundPts', 'n', 'Platz- und Par-Punkte der gewerteten Runden (Streicher abgezogen)'], ['Bonus beste Runde', 'bonus', 'n', '+10 für die bislang beste Runde der Saison gegen Par'], ['Matchplay', 'mp', 'n', 'Matchplay bzw. Split Sixes, alle Runden, nie gestrichen'], ['Runden', 'played', 'n', 'gespielte Saisonrunden'], ['gewertet', 'counted', 'n', 'Runden, deren Rundenpunkte zählen'], ['gestrichen', 'struck', 'n', 'Streichergebnisse'], ['Total gegen Par', 'totPar', 'n', 'Summe der gewerteten Runden'], ['Ø gegen Par', 'avgPar', 'n', 'Schnitt der gewerteten Runden'], ['Beste Runde', 'best', 'n', 'beste Runde gegen Par (alle Runden)']];
+    const cols = opts.compact ? full.filter(c => ['name', 'total', 'roundPts', 'bonus', 'mp', 'played', 'struck', 'avgPar', 'best'].includes(c[1])) : full;
     const fmtC = (k, v) => ['totPar', 'avgPar', 'best'].includes(k) ? fmtPar(k === 'avgPar' && v != null ? Math.round(v * 10) / 10 : v) : k === 'name' ? esc(v) : fmtPts(v);
-    const rows = [...t].sort((a, b) => b.total - a.total || b.mp - a.mp);
-    h += `<div class="wrap"><table class="tms-sort" data-default="total"><thead><tr>${cols.map(([l, k, ty]) => `<th class="sort${k === 'name' ? ' l' : ''}" data-k="${k}" data-t="${ty}">${l}</th>`).join('')}</tr></thead><tbody>` +
-      rows.map(r => `<tr>${cols.map(([l, k]) => `<td class="${k === 'name' ? 'l' : ''}${k === 'total' ? ' cnt' : ''}" data-v="${r[k] == null ? '' : r[k]}">${fmtC(k, r[k])}</td>`).join('')}</tr>`).join('') + '</tbody></table></div>';
-    return h;
+    const rows = [...t].sort((a, b) => b.total - a.total || b.einzel - a.einzel || (a.best ?? 99) - (b.best ?? 99));
+    return (opts.noTitles ? '' : titlesHTML(S)) + `<div class="wrap"><table class="tms-sort" data-default="total"><thead><tr>${cols.map(([l, k, ty, tt]) => `<th class="sort${k === 'name' ? ' l' : ''}${k === 'total' ? ' desc' : ''}" data-k="${k}" data-t="${ty}" title="${esc(tt)}">${l}</th>`).join('')}</tr></thead><tbody>` +
+      rows.map(r => `<tr>${cols.map(([l, k]) => `<td class="${k === 'name' ? 'l' : ''}${k === 'total' ? ' cnt' : ''}" data-v="${r[k] == null ? '' : r[k]}">${fmtC(k, r[k])}</td>`).join('')}</tr>`).join('') + '</tbody></table></div>' +
+      `<p class="sub">Gesamt = Rundenpunkte der gewerteten Runden + Bonus beste Runde + Matchplay-Punkte. Gestrichen werden nur Rundenpunkte, Matchplay zählt immer. Spaltenüberschrift anklicken zum Sortieren.</p>`;
   }
 
   function matrixHTML(S) {
@@ -205,11 +211,12 @@ var TMSeason = (function () {
     const cell = (r, name) => {
       const pl = S.table.find(x => x.name === name), x = pl && pl.rounds.find(z => z.r.id === r.id);
       if (!x) return '<td class="na">–</td>';
-      return `<td class="${x.counted ? 'cnt' : 'str'}" title="${x.counted ? 'gewertet' : 'gestrichen'} · ${x.p.gross} Schläge (${fmtPar(x.p.toPar)}) · Platz ${x.p.rank}: ${fmtPts(x.p.place)} + Bonus ${x.p.bonus}">${fmtPts(x.p.points)}</td>`;
+      const mp = x.p.mp || 0;
+      return `<td title="${x.counted ? 'Rundenpunkte gewertet' : 'Rundenpunkte gestrichen'} · ${x.p.gross} Schläge (${fmtPar(x.p.toPar)}) · Platz ${x.p.rank}: ${fmtPts(x.p.place)} + Par-Bonus ${x.p.bonus} · Matchplay ${fmtPts(mp)}"><span class="${x.counted ? 'cnt' : 'str'}">${fmtPts(x.p.points)}</span> <span class="mpx">+${fmtPts(mp)}</span></td>`;
     };
     return `<div class="wrap"><table><thead><tr><th class="l">Spieler</th>${inc.map(r => `<th title="${esc(r.course)}">${fmtDay(r.day)}</th>`).join('')}<th>gewertet</th></tr></thead><tbody>` +
       names.map(n => { const pl = S.table.find(x => x.name === n); return `<tr><td class="l">${esc(n)}</td>${inc.map(r => cell(r, n)).join('')}<td>${pl.counted} von ${pl.played}</td></tr>`; }).join('') +
-      `</tbody></table></div><p class="sub">Rundenpunkte (Platz + Par-Bonus). <b>Fett</b> = gewertet, <span class="str">durchgestrichen</span> = gestrichen, – = nicht gespielt. Mit der Maus über eine Zahl: Score und Zusammensetzung.</p>`;
+      `</tbody></table></div><p class="sub">Je Runde: Rundenpunkte (Platz + Par-Bonus) <span class="mpx">+ Matchplay-Punkte</span>. <b>Fett</b> = Rundenpunkte gewertet, <span class="str">durchgestrichen</span> = gestrichen; Matchplay-Punkte zählen immer. – = nicht gespielt. Mit der Maus über eine Zelle: Score und Zusammensetzung.</p>`;
   }
 
   function roundsHTML(S, opts = {}) {
@@ -222,10 +229,10 @@ var TMSeason = (function () {
       if (r.players.length) {
         const ps = [...r.players].sort((a, b) => a.toPar - b.toPar);
         const struck = name => { const pl = S.table.find(x => x.name === name); const x = pl && pl.rounds.find(z => z.r.id === r.id); return x ? (x.counted ? '<span class="cnt">gewertet</span>' : '<span class="str">gestrichen</span>') : ''; };
-        body += `<div class="wrap"><table><tr><th class="l">Spieler</th><th>Schläge</th><th>gegen Par</th><th>Platz</th><th>Platzpunkte</th><th>Par-Bonus</th><th>Rundenpunkte</th><th>Matchplay</th><th class="l">Saison</th></tr>` +
-          ps.map(p => `<tr><td class="l">${esc(p.name)}</td><td>${p.gross}</td><td>${fmtPar(p.toPar)}</td><td>${r.included ? p.rank + '.' : '–'}</td><td>${r.included ? fmtPts(p.place) : '–'}</td><td>${r.included ? p.bonus : '–'}</td><td><b>${r.included ? fmtPts(p.points) : '–'}</b></td><td>${r.included ? fmtPts(p.mp) + (p.split != null ? ' (' + fmtPts(p.split) + ' SSx)' : '') : '–'}</td><td class="l">${r.included ? struck(p.name) : ''}</td></tr>`).join('') + '</table></div>';
+        body += `<div class="wrap"><table><tr><th class="l">Spieler</th><th>Schläge</th><th>gegen Par</th><th>Platz</th><th>Platzpunkte</th><th>Par-Bonus</th><th>Rundenpunkte</th><th>Matchplay</th><th>Tag gesamt</th><th class="l">Rundenpunkte in der Saison</th></tr>` +
+          ps.map(p => `<tr><td class="l">${esc(p.name)}</td><td>${p.gross}</td><td>${fmtPar(p.toPar)}</td><td>${r.included ? p.rank + '.' : '–'}</td><td>${r.included ? fmtPts(p.place) : '–'}</td><td>${r.included ? p.bonus : '–'}</td><td><b>${r.included ? fmtPts(p.points) : '–'}</b></td><td>${r.included ? fmtPts(p.mp) + (p.split != null ? ' (' + fmtPts(p.split) + ' Split-Sixes-Punkte)' : '') : '–'}</td><td>${r.included ? fmtPts(p.points + (p.mp || 0)) : '–'}</td><td class="l">${r.included ? struck(p.name) : ''}</td></tr>`).join('') + '</table></div>';
         if (r.included && r.match) {
-          if (r.match.type === 'duel' && r.match.missing) body += '<p class="warn">Matchplay: Paarungen für diese Runde fehlen noch – in Trackman Live unter „Saison“ eintragen.</p>';
+          if (r.match.type === 'duel' && r.match.missing) body += '<p class="warn">Matchplay: Paarungen für diese Runde fehlen noch – in Trackman Live in der Tageswertung oder unter „Saison verwalten“ eintragen.</p>';
           else if (r.match.type === 'duel') body += '<p class="sub">Matchplay: ' + r.match.duels.map(d => `${esc(d.a)} – ${esc(d.b)}: ${d.won.a}:${d.won.b} Löcher (${d.won.h} geteilt) → ${d.pts[0]}:${d.pts[1]} Punkte`).join(' · ') + '</p>';
           else if (r.match.type === 'split') body += '<p class="sub">Split Sixes (4/2/0 pro Loch): ' + r.players.map((p, i) => `${esc(p.name)} ${fmtPts(r.match.tot[i])}`).join(' · ') + ' → Tagespunkte 2/1/0</p>';
         }
@@ -244,9 +251,9 @@ var TMSeason = (function () {
       <li>Par-Bonus pro Runde: Runde auf Par +1, unter Par +3. Rundenpunkte = Platzpunkte + Par-Bonus.</li>
       <li>Streichergebnisse je Spieler: bis 3 Runden zählen alle, bei 4 Runden zählen 3, ab 5 Runden zählen 60 % kaufmännisch gerundet (5→3, 6→4, 7→4, 8→5, 10→6). Gewertet werden die Runden mit den meisten Punkten; bei gleichen Punkten die bessere Runde gegen Par, dann die frühere.</li>
       <li>Bonus beste Runde des Winters: +10 an den Spieler mit der bislang besten Runde gegen Par über die ganze Saison; wird sie verbessert, wandert der Bonus. Bei Gleichstand bekommen alle Inhaber +10. Der Bonus wird nicht gestrichen.</li>
-      <li>Einzelwertung = Punkte der gewerteten Runden + Bonus beste Runde. „Total/Ø gegen Par“ beziehen sich nur auf die gewerteten Runden.</li>
+      <li>Gesamtpunkte = Rundenpunkte der gewerteten Runden + Bonus beste Runde + alle Matchplay-Punkte. Danach wird der Winter-Tour-Champion bestimmt. „Total/Ø gegen Par“ beziehen sich nur auf die gewerteten Runden.</li>
       <li>Matchplay (brutto, Lochwettspiel über alle Löcher): 2 Spieler ein Duell, 4 Spieler zwei ausgeloste Duelle (Paarungen von Hand). Sieg 2, Unentschieden 1, Niederlage 0 Punkte.</li>
-      <li>3 Spieler: Split Sixes – pro Loch 4/2/0 Punkte, Gleichstände geteilt (3/3/0, 4/1/1, 2/2/2). Tagessieger 2, Zweiter 1, Letzter 0 Punkte; bei Punktgleichheit die Punkte der besseren Platzierung. Matchplay-Punkte werden nie gestrichen.</li>
+      <li>3 Spieler: Split Sixes – pro Loch 4/2/0 Punkte, Gleichstände geteilt (3/3/0, 4/1/1, 2/2/2). Tagessieger 2, Zweiter 1, Letzter 0 Punkte; bei Punktgleichheit die Punkte der besseren Platzierung. Matchplay-Punkte werden nie gestrichen. Matchplay-Champion ist, wer die meisten Matchplay-Punkte hat.</li>
       <li>Joker sind noch nicht umgesetzt.</li></ul></details>`;
   }
 
@@ -273,7 +280,7 @@ var TMSeason = (function () {
     });
   }
 
-  return { compute, countedRounds, placePoints, splitSixes, dayPointsSplit, encrypt, decrypt, fullHTML, standingsHTML, matrixHTML, roundsHTML, rulesHTML, bindSort, CSS, localDate };
+  return { compute, countedRounds, placePoints, splitSixes, dayPointsSplit, holesWon, encrypt, decrypt, fullHTML, titlesHTML, standingsHTML, matrixHTML, roundsHTML, rulesHTML, bindSort, CSS, localDate, esc, fmtPts, fmtPar };
 })();
 if (typeof module !== 'undefined') module.exports = TMSeason;
 (async () => {
@@ -303,7 +310,7 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
   select, button { padding:4px 9px; border-radius:6px; border:1px solid var(--line); background:var(--surface); color:var(--text); }
   button { cursor:pointer; } button.pri { background:var(--s1); color:#fff; border-color:var(--s1); } button:disabled { opacity:.4; cursor:default; }
   label { color:var(--t2); font-size:13px; display:inline-flex; gap:6px; align-items:center; }
-  main { padding:16px 20px 40px; max-width:1500px; margin:0 auto; }
+  main { padding:16px 24px 40px; max-width:2200px; margin:0 auto; }
   .row { display:grid; gap:14px; margin-bottom:14px; }
   .cards { grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); }
   .two { grid-template-columns:1.1fr 1fr; } @media (max-width:1100px) { .two { grid-template-columns:1fr; } }
@@ -320,6 +327,7 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
   .shot { border-top:1px solid var(--line); padding:6px 0 2px; font-size:13px; font-variant-numeric:tabular-nums; }
   .shot .l1 { display:flex; justify-content:space-between; gap:8px; } .shot .l2 { color:var(--t2); font-size:12px; }
   .pos { color:var(--pos); } .neg { color:var(--neg); }
+  .k { color:var(--t2); font-size:12px; font-weight:400; }
   table { border-collapse:collapse; width:100%; font-size:13px; font-variant-numeric:tabular-nums; }
   th, td { padding:6px 8px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap; }
   th { color:var(--t2); font-weight:600; } th:first-child, td:first-child { text-align:left; }
@@ -350,7 +358,18 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
   .err { background:var(--hl); padding:8px 12px; border-radius:8px; margin-bottom:12px; font-size:13px; }
   .rp { display:none; align-items:center; gap:8px; } .rp.on { display:inline-flex; } .rp input { width:260px; }
   #tip { position:fixed; pointer-events:none; background:var(--text); color:var(--bg); font-size:12px; padding:6px 8px; border-radius:6px; display:none; z-index:10; max-width:280px; }
-  .w { --muted:var(--mut); --accent:var(--s1); } #seasonBtn.on { background:var(--s1); color:#fff; border-color:var(--s1); }
+  .w { --muted:var(--mut); --accent:var(--s1); }
+  .vtabs { display:inline-flex; gap:2px; border:1px solid var(--line); border-radius:8px; padding:2px; background:var(--surface); }
+  .vtabs button { border:0; background:none; padding:4px 12px; border-radius:6px; } .vtabs button.on { background:var(--s1); color:#fff; }
+  .top3 { grid-template-columns:minmax(0,1fr) 260px; } @media (max-width:1100px) { .top3 { grid-template-columns:1fr; } }
+  .day { border:2px solid var(--s1); }
+  .rec1 { grid-template-columns:1fr; }
+  .dt td, .dt th { text-align:center; padding:6px 4px; min-width:30px; } .dt td:first-child, .dt th:first-child { text-align:left; min-width:120px; }
+  .dt .dsc { text-align:right; min-width:78px; padding-right:12px; } .dt .dst { text-align:left; min-width:150px; padding-left:14px; }
+  .dt .par td { color:var(--t2); font-size:12px; } .dt .win { font-weight:700; border-radius:6px; }
+  .dt .mpsep td { text-align:left; color:var(--t2); font-size:12px; background:var(--surface); padding-top:8px; }
+  .big2 { font-size:18px; font-weight:650; } .stk { display:block; font-size:10px; color:var(--t2); font-weight:400; line-height:1; }
+  .dmsg { color:var(--text); background:var(--hl); padding:4px 8px; border-radius:6px; display:inline-block; }
   .sed { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; margin:8px 0; padding:8px 10px; background:var(--surface); border:1px solid var(--line); border-radius:8px; }
   .sed label, .sub input { font-size:13px; } input[type=password], input[type=date], #sparts { font:inherit; font-size:13px; padding:3px 6px; border-radius:6px; border:1px solid var(--line); background:var(--surface); color:var(--text); }
   .nomeas { background:var(--surface); border:1px dashed var(--line); border-radius:10px; padding:12px; color:var(--t2); font-size:13px; }
@@ -360,12 +379,12 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
   </style>
   <div class="w">
     <div class="top">
-      <h1>Trackman Live <span style="font-weight:400;font-size:12px;color:var(--t2)">v1.7</span></h1>
+      <h1>Trackman Live <span style="font-weight:400;font-size:12px;color:var(--t2)">v1.8</span></h1>
+      <span class="vtabs"><button data-tab="overview">Übersicht</button><button data-tab="shots">Schlagdaten</button><button data-tab="season">Saison verwalten</button></span>
       <select id="round" title="Runde"></select>
       <label><input type="checkbox" id="follow" checked> neueste Runde folgen</label>
       <span class="meta" id="meta"></span>
       <span class="sp"></span>
-      <button id="seasonBtn" title="Saisonwertung: Runden übernehmen, Paarungen eintragen, speichern">Saison</button>
       <label id="replayL"><input type="checkbox" id="replay"> Replay</label>
       <span class="rp" id="rp"><button id="rpPlay">▶</button><input type="range" id="rpPos" min="0" max="0" value="0"><span class="meta" id="rpTxt"></span></span>
       <label>alle <select id="ival"><option value="15">15 s</option><option value="30" selected>30 s</option><option value="60">60 s</option></select></label>
@@ -439,7 +458,7 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
   const QLIST = `{ me { scorecards(take:12) { id state thruHole startedAt lastUpdatedAt course { displayName } playersScorecards { player { name } } } } }`;
 
   const saved = store.get();
-  const S = { view: 'live', sawLive: new Set(saved.sawLive || []), list: [], id: saved.id || null, follow: saved.follow !== false, data: saved.data || null, ival: saved.ival || 30, paused: false, sel: 0, shotIdx: null, liveShot: true, replay: false, rpPos: 0, rpTimer: null, lastFetch: null, err: '', matches: saved.matches || null };
+  const S = { view: ['overview', 'shots', 'season'].includes(saved.tab) ? saved.tab : 'overview', dayMsg: '', autoSynced: new Set(), sawLive: new Set(saved.sawLive || []), list: [], id: saved.id || null, follow: saved.follow !== false, data: saved.data || null, ival: saved.ival || 30, paused: false, sel: 0, shotIdx: null, liveShot: true, replay: false, rpPos: 0, rpTimer: null, lastFetch: null, err: '', matches: saved.matches || null };
   $('#follow').checked = S.follow; $('#ival').value = String(S.ival);
 
   async function loadList() {
@@ -468,7 +487,7 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
     if (busy) return; busy = true; S.err = '';
     try { await loadList(); await loadRound(); }
     catch (e) { S.err = e.message === 'AUTH' ? 'Anmeldung abgelaufen – Portal neu laden, anmelden und den Knopf erneut klicken.' : 'Aktualisierung fehlgeschlagen: ' + e.message; }
-    busy = false; if (S.view !== 'season') render();
+    busy = false; if (S.view !== 'season') render(); seasonAuto();
   }
 
   // ---------------- Auswertung ----------------
@@ -533,6 +552,7 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
 
   // ---------------- Darstellung ----------------
   let A = null;
+  const stateDe = { IN_PROGRESS: 'läuft', COMPLETED: 'fertig', SAVED: 'gespeichert', DID_NOT_FINISH: 'abgebrochen' };
   function render() {
     if (S.view === 'season') { renderSeason(); return; }
     const sc = S.data;
@@ -542,141 +562,174 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
     if (S.replay) { $('#rpPos').max = A.timeline.length; $('#rpPos').value = S.rpPos; $('#rpTxt').textContent = `Schlag ${S.rpPos} / ${A.timeline.length}`; }
     const P = A.players;
     if (S.sel >= P.length) S.sel = 0;
-    const latest = P.reduce((b, p) => (p.lastT > (b ? b.lastT : '') ? p : b), null);
-    const stateDe = { IN_PROGRESS: 'läuft', COMPLETED: 'fertig', SAVED: 'gespeichert', DID_NOT_FINISH: 'abgebrochen' };
     const mode = sc.gameSettings && sc.gameSettings.puttingSettings ? sc.gameSettings.puttingSettings.puttingMode : '';
     $('#meta').textContent = `${sc.course.displayName.trim()} · ${stateDe[sc.state] || sc.state} · Putts: ${mode || '?'} · aktualisiert ${S.lastFetch ? S.lastFetch.toLocaleTimeString('de-DE') : '(Cache)'}`;
+    const allShots = P.flatMap(p => p.shots);
+    const isLive = sc.state === 'IN_PROGRESS', nMeas = allShots.filter(s => s.m && s.m.ballSpeed != null).length;
+    if (isLive && !S.sawLive.has(sc.id)) { S.sawLive.add(sc.id); store.set({ sawLive: [...S.sawLive].slice(-10) }); }
+    const best = (arr, f, cmp) => arr.reduce((b, s) => { const v = f(s); return v == null || isNaN(v) ? b : (!b || cmp(v, b.v) ? { s, v } : b); }, null);
+    const recBox = (k, r, f) => `<div><div class="k">${k}</div><div class="v">${r ? f(r.v) : '–'}</div><div class="k">${r ? esc(P[r.s.pi].name) + ' · Loch ' + r.s.hole : ''}</div></div>`;
+    if (S.view === 'shots') { renderShots(sc, P, allShots, isLive, nMeas, best, recBox, errHtml); return; }
 
-    // Spielerkarten
-    const cards = P.map((p, i) => {
-      const last2 = [...p.shots].sort((a, b) => (b.t || '') < (a.t || '') ? -1 : 1).slice(0, 2);
-      const adj = p.score + p.sg['Putting'];
-      return `<div class="card pc${i === S.sel ? ' sel' : ''}" data-p="${i}">
-        <div class="nm"><span class="dot" style="background:${COLORS[i % 4]}"></span>${p.name}${latest === p ? ' <span class="badge">zuletzt</span>' : ''}</div>
-        <div class="sc"><div><div class="big">${p.thru ? toPar(p.toPar) : '–'}</div><div class="k">${p.thru ? p.score + ' nach ' + p.thru + ' Loch' : 'noch kein Loch fertig'}</div></div>
-          <div><div class="big ${cls(p.sgTotal)}" style="font-size:20px">${sgn(p.sgTotal, 1)}</div><div class="k">SG gesamt</div></div>
-          <div><div class="big" style="font-size:20px">${p.thru ? fmt(adj, 1) : '–'}</div><div class="k" title="Score + SG Putting: Score bei durchschnittlichem Putt-Glück">ohne Putt-Glück</div></div></div>
-        ${last2.map(shotLine).join('') || '<div class="shot l2">noch keine Schläge</div>'}
-      </div>`;
-    }).join('');
+    // Rekorde (positionsbasiert, auch live verfügbar)
+    const drv = best(allShots.filter(s => s.lie0 === 'Tee' && s.par >= 4), s => s.travel, (a, b) => a > b);
+    const prox = best(allShots.filter(s => s.d0 / 0.9144 >= 100 && (s.lie1 === 'Green' || s.lie1 === 'HoleCup')), s => s.lie1 === 'HoleCup' ? 0 : s.d1, (a, b) => a < b);
+    const rec = `<div class="rec rec1">${recBox('Längster Drive', drv, v => fmt(v, 0) + ' m')}${recBox('Nearest to the pin (ab 100 y)', prox, v => fmt(v, 1) + ' m')}</div>`;
 
-    // SG-Matrix
+    // SG-Matrix inkl. Score und „ohne Putt-Glück“
     const allV = P.flatMap(p => [...CATS.map(c => p.sg[c]), p.sgTotal]);
     const mx = Math.max(1, ...allV.map(Math.abs));
     const cell = v => { const a = Math.min(1, Math.abs(v) / mx) * 0.55; const col = v >= 0 ? '42,120,214' : '235,104,52'; return `<td class="hm" style="background:rgba(${col},${a.toFixed(2)})">${sgn(v)}</td>`; };
     const matrix = `<table><tr><th>Spieler</th>${CATS.map(c => `<th>${SHORT[c]}</th>`).join('')}<th>Gesamt</th><th>Score</th><th title="Score + SG Putting">ohne Putt-Glück</th></tr>` +
-      P.map(p => `<tr><td><span class="dot" style="background:${COLORS[p.i % 4]}"></span> ${p.name}</td>${CATS.map(c => cell(p.sg[c])).join('')}${cell(p.sgTotal)}<td>${p.thru ? p.score + ' (' + toPar(p.toPar) + ')' : '–'}</td><td><b>${p.thru ? fmt(p.score + p.sg['Putting'], 1) : '–'}</b></td></tr>`).join('') + '</table>';
+      P.map(p => `<tr><td><span class="dot" style="background:${COLORS[p.i % 4]}"></span> ${esc(p.name)}</td>${CATS.map(c => cell(p.sg[c])).join('')}${cell(p.sgTotal)}<td>${p.thru ? p.score + ' (' + toPar(p.toPar) + ')' + (p.thru < 18 ? ' · ' + p.thru + ' L.' : '') : '–'}</td><td><b>${p.thru ? fmt(p.score + p.sg['Putting'], 1) : '–'}</b></td></tr>`).join('') + '</table>';
 
-    // Rekorde
-    const allShots = P.flatMap(p => p.shots);
-    const isLive = sc.state === 'IN_PROGRESS', nMeas = allShots.filter(s => s.m && s.m.ballSpeed != null).length;
-    if (isLive && !S.sawLive.has(sc.id)) { S.sawLive.add(sc.id); store.set({ sawLive: [...S.sawLive].slice(-10) }); }
-    const banner = isLive ? `<div class="done" style="background:var(--surface);border:1px solid var(--line)"><span>Runde läuft · Score, Lagen, Distanzen und Strokes Gained sind live. <b>Schläger- und Balldaten</b> (Club Speed, Ball Speed, Spin, Carry …) liefert Trackman erst nach Rundenende – dann gibt es die Nachbetrachtung.</span></div>`
-      : sc.state === 'COMPLETED' && S.sawLive.has(sc.id) && !S.replay ? `<div class="done"><b>Runde beendet.</b><span>Messwerte für ${nMeas} von ${allShots.length} Schlägen da${nMeas < allShots.length ? ' – der Rest kommt meist nach ein paar Minuten, die Seite aktualisiert sich selbst' : ''}.</span><button class="pri" id="goReplay">Nachbetrachtung: Replay starten</button><button id="hideDone">Ausblenden</button></div>` : '';
-    const best = (arr, f, cmp) => arr.reduce((b, s) => { const v = f(s); return v == null || isNaN(v) ? b : (!b || cmp(v, b.v) ? { s, v } : b); }, null);
-    const drv = best(allShots.filter(s => s.lie0 === 'Tee' && s.par >= 4), s => s.travel, (a, b) => a > b);
-    const prox = best(allShots.filter(s => s.d0 / 0.9144 >= 100 && (s.lie1 === 'Green' || s.lie1 === 'HoleCup')), s => s.lie1 === 'HoleCup' ? 0 : s.d1, (a, b) => a < b);
-    const bs = best(allShots, s => mph(s.m.ballSpeed), (a, b) => a > b);
-    const sm = best(allShots.filter(s => /driver/i.test(s.club || '') && s.m.smashFactor <= 1.56), s => s.m.smashFactor, (a, b) => a > b);
-    const recBox = (k, r, f) => `<div><div class="k">${k}</div><div class="v">${r ? f(r.v) : '–'}</div><div class="k">${r ? P[r.s.pi].name + ' · Loch ' + r.s.hole : ''}</div></div>`;
-    const measBox = `<div><div class="k">Ball Speed und Smash</div><div class="v" style="font-size:15px">${isLive ? 'nach Rundenende' : 'Messwerte fehlen noch'}</div><div class="k">Trackman liefert Schläger- und Balldaten erst, wenn die Runde beendet ist</div></div>`;
-    const rec = `<div class="rec">${recBox('Längster Drive (im Spiel, Par 4/5)', drv, v => fmt(v, 0) + ' m')}${recBox('Nächster Approach (ab 100 y)', prox, v => fmt(v, 1) + ' m')}${isLive || !nMeas ? measBox : recBox('Höchste Ball Speed', bs, v => fmt(v, 1) + ' mph') + recBox('Bester Smash (Driver)', sm, v => fmt(v, 2))}</div>`;
+    const banner = sc.state === 'COMPLETED' && S.sawLive.has(sc.id) && !S.replay ? `<div class="done"><b>Runde beendet.</b><span>Schläger- und Balldaten für ${nMeas} von ${allShots.length} Schlägen da${nMeas < allShots.length ? ' – der Rest kommt meist nach ein paar Minuten' : ''}.</span><button class="pri" id="goShots">Schlagdaten ansehen</button><button id="hideDone">Ausblenden</button></div>` : '';
 
     main.innerHTML = errHtml + banner + `
-      <div class="row cards">${cards}</div>
-      ${P.length >= 2 ? `<div class="row"><div class="card mp" id="mp">${matchplay(sc, P)}</div></div>` : ''}
+      <div class="row top3">
+        <div class="card day" id="day">${dayHTML(sc, P)}</div>
+        <div class="card"><h2>Rekorde der Runde</h2>${rec}</div>
+      </div>
       <div class="row two">
         <div class="card"><h2>Strokes Gained dieser Runde</h2><p class="sub">Summe in Schlägen gegen PGA-Tour-Baseline. Blau = gewonnen, orange = verloren. „Ohne Putt-Glück“ = Score + SG Putting, also der Score bei durchschnittlichem Auto-Putt.</p>${matrix}</div>
-        <div class="card"><h2>SG-Rennen</h2><div class="legend">${P.map(p => `<span><span class="dot" style="background:${COLORS[p.i % 4]}"></span>${p.name}</span>`).join('')}</div><div id="race"></div></div>
+        <div class="card"><h2>SG-Rennen</h2><div class="legend">${P.map(p => `<span><span class="dot" style="background:${COLORS[p.i % 4]}"></span>${esc(p.name)}</span>`).join('')}</div><div id="race"></div></div>
       </div>
-      <div class="row"><div class="card"><h2>Rekorde der Runde</h2>${rec}</div></div>
-      <div class="row"><div class="card" id="detail"></div></div>
+      <div class="row"><div class="card tms" id="sstand">${seasonMiniHTML()}</div></div>
       <div class="row"><div class="card"><details class="help"><summary>Wie wird gerechnet?</summary>
-        <ul><li>Baseline: Polynom-Fits an Broadies PGA-Tour-Tabellen (Distanz m → Yards; Putting in Fuß, bis 3 ft fix 1,00; Tee unter 80 y = Wert bei 80 y).</li>
+        <ul><li>Tageswertung brutto: 2 Spieler ein Matchplay, 4 Spieler zwei Matchplays (ausgeloste Paarungen der Saison), 3 Spieler Split Sixes (pro Loch 4/2/0 Punkte, Gleichstände geteilt). Gewertet werden nur Löcher, die alle Beteiligten fertig gespielt haben. Matchplay entschieden, sobald der Vorsprung größer ist als die verbleibenden Löcher (z. B. 3&2).</li>
+        <li>Baseline: Polynom-Fits an Broadies PGA-Tour-Tabellen (Distanz m → Yards; Putting in Fuß, bis 3 ft fix 1,00; Tee unter 80 y = Wert bei 80 y).</li>
         <li>Lagen: Tee, Fairway (auch Vorgrün), Semirough = Mittel aus Fairway und Rough, Rough, Bunker, Grün; Deep Rough und alles andere = Recovery.</li>
         <li>Kategorien: Tee = Abschläge Par 4/5; Approach = übrige Schläge ab 100 y; Kurzspiel = unter 100 y außerhalb des Grüns; Putting = erwartete Putts aus der Distanz − vergebene Auto-Putts.</li>
         <li>SG je Schlag = Erwartung vorher − Erwartung vor dem nächsten Schlag − 1 − Strafschläge. Löcher mit Pickup, Mulligan oder eigenem Schlag vom Grün zählen nicht.</li>
-        <li>Score und „nach X Loch“ zählen nur fertig gespielte Löcher. Carry = Matte (eben), „Spiel“ = von Trackman mit Lage, Gefälle und Wind simuliert.</li>
-        <li>Rekorde: längster Drive = tatsächlich zurückgelegte Strecke im Spiel; nächster Approach = Abstand zur Fahne nach Schlägen aus mindestens 100 y, die auf dem Grün oder im Loch enden.</li></ul></details></div></div>`;
-    if (P.length >= 2) bindMatchplay(P);
-    const gr = root.querySelector('#goReplay'); if (gr) gr.onclick = () => { $('#replay').checked = true; $('#replay').onchange(); };
+        <li>Rekorde: längster Drive = tatsächlich zurückgelegte Strecke im Spiel (Abschläge Par 4/5); Nearest to the pin = Abstand zur Fahne nach Schlägen aus mindestens 100 y, die auf dem Grün oder im Loch enden.</li></ul></details></div></div>`;
+    bindDay(sc, P);
+    TMSeason.bindSort(root.querySelector('#sstand'));
+    const ss = root.querySelector('#goSeason'); if (ss) ss.onclick = () => setTab('season');
+    const gs = root.querySelector('#goShots'); if (gs) gs.onclick = () => setTab('shots');
     const hd = root.querySelector('#hideDone'); if (hd) hd.onclick = () => { S.sawLive.delete(sc.id); store.set({ sawLive: [...S.sawLive] }); render(); };
-    root.querySelectorAll('.pc').forEach(c => c.onclick = () => { S.sel = +c.dataset.p; S.shotIdx = null; S.liveShot = true; render(); });
     drawRace(P);
+  }
+
+  function renderShots(sc, P, allShots, isLive, nMeas, best, recBox, errHtml) {
+    const bs = best(allShots, s => mph(s.m.ballSpeed), (a, b) => a > b);
+    const sm = best(allShots.filter(s => /driver/i.test(s.club || '') && s.m.smashFactor <= 1.56), s => s.m.smashFactor, (a, b) => a > b);
+    const cs = best(allShots, s => mph(s.m.clubSpeed), (a, b) => a > b);
+    const info = isLive ? `<div class="nomeas" style="margin-bottom:14px">Runde läuft – Schläger- und Balldaten (Club Speed, Ball Speed, Spin, Carry …) liefert Trackman erst nach Rundenende. Lage, Distanzen und Strokes Gained je Schlag sind schon da.</div>`
+      : `<p class="sub">Schläger- und Balldaten für ${nMeas} von ${allShots.length} Schlägen vorhanden${nMeas < allShots.length && sc.state === 'COMPLETED' ? ' – der Rest kommt meist nach ein paar Minuten nach Rundenende' : ''}.</p>`;
+    main.innerHTML = errHtml + `${info}
+      ${nMeas ? `<div class="row"><div class="card"><h2>Rekorde (Messwerte)</h2><div class="rec">${recBox('Höchste Ball Speed', bs, v => fmt(v, 1) + ' mph')}${recBox('Höchste Club Speed', cs, v => fmt(v, 1) + ' mph')}${recBox('Bester Smash (Driver)', sm, v => fmt(v, 2))}</div></div></div>` : ''}
+      <div class="row"><div class="card" id="detail"></div></div>`;
     renderDetail();
   }
 
-  // Simuliertes Matchplay, brutto: Loch an den Spieler mit weniger Schlägen, gleich = geteilt. Mehrere Matches parallel.
+  // ---------- Tageswertung (Matchplay / Split Sixes, brutto) ----------
+  const PAIRS = n => [[[n[0], n[1]], [n[2], n[3]]], [[n[0], n[2]], [n[1], n[3]]], [[n[0], n[3]], [n[1], n[2]]]];
+  const pairKey = pp => JSON.stringify(pp.map(p => [...p].sort()).sort());
+  function dayPlayers(P) {
+    const parts = SE.season && SE.season.config ? new Set(SE.season.config.participants || []) : null;
+    const inSeason = parts ? P.filter(p => parts.has(p.name)) : P;
+    return inSeason.length >= 2 ? inSeason : P;
+  }
+  function getPairs(sc) {
+    if (SE.season) { const rr = (SE.season.rounds || []).find(x => x.id === sc.id); const pp = (rr && rr.pairings) || (SE.season.pairings || {})[sc.id]; if (pp) return { pairs: pp, src: 'season' }; }
+    const loc = (store.get().localPairs || {})[sc.id]; if (loc) return { pairs: loc, src: 'local' };
+    return { pairs: null, src: null };
+  }
+  async function setPairs(sc, pairs) {
+    if (SE.season) {
+      const rr = (SE.season.rounds || []).find(x => x.id === sc.id);
+      if (rr) rr.pairings = pairs; else { SE.season.pairings = SE.season.pairings || {}; SE.season.pairings[sc.id] = pairs; }
+      SE.dirty = true;
+      if (sstore.get().gh) { S.dayMsg = 'Speichere Paarungen …'; render(); try { await seasonSave(); S.dayMsg = 'Paarungen in der Saison gespeichert.'; } catch (e) { S.dayMsg = e.message; } }
+      else S.dayMsg = 'Paarungen geändert, aber nicht gespeichert: Unter „Saison verwalten“ fehlt der GitHub-Token.';
+    } else {
+      const lp = store.get().localPairs || {}; lp[sc.id] = pairs; store.set({ localPairs: lp });
+      S.dayMsg = 'Paarungen nur in diesem Browser gemerkt – für die Saison unter „Saison verwalten“ das Passwort eingeben.';
+    }
+    render();
+  }
+  function dayHTML(sc, P) {
+    const DP = dayPlayers(P), n = DP.length;
+    const nHoles = Math.max(...sc.playersScorecards.map(ps => Math.max(0, ...ps.holes.map(h => h.holeNumber))), 9) > 9 ? 18 : 9;
+    const holes = Array.from({ length: nHoles }, (_, i) => i + 1);
+    const par = {}; sc.playersScorecards.forEach(ps => ps.holes.forEach(h => { if (par[h.holeNumber] == null) par[h.holeNumber] = h.par; }));
+    const scoreOf = p => { const o = {}; p.holes.forEach(h => { if (h.complete) o[h.hole] = h.score; }); return o; };
+    const name = p => `<span class="dot" style="background:${COLORS[p.i % 4]}"></span> ${esc(p.name)}`;
+    const scoreTd = p => `<td class="dsc">${p.thru ? `<b>${toPar(p.toPar)}</b> <span class="k">${p.thru < nHoles ? p.thru + ' L.' : p.score}</span>` : '–'}</td>`;
+    const head = `<tr><th>Spieler</th><th class="dsc">Score</th>${holes.map(h => `<th>${h}</th>`).join('')}<th class="dst">Stand</th></tr><tr class="par"><td class="k">Par</td><td></td>${holes.map(h => `<td class="k">${par[h] ?? ''}</td>`).join('')}<td></td></tr>`;
+    const msg = S.dayMsg ? `<p class="sub dmsg">${esc(S.dayMsg)}</p>` : '';
+    const seasonHint = !SE.season ? `<p class="sub">Saison nicht geladen – Paarungen gelten nur in diesem Browser. Unter „Saison verwalten“ das Saison-Passwort eingeben.</p>` : '';
+    if (n === 3) {
+      const sc3 = DP.map(scoreOf), tot = [0, 0, 0], pts = {};
+      holes.forEach(h => { const v = sc3.map(o => o[h]); if (v.some(x => x == null)) return; const p3 = TMSeason.placePoints(v, [4, 2, 0]).points; pts[h] = p3; p3.forEach((x, k) => tot[k] += x); });
+      const day = TMSeason.dayPointsSplit(tot), played = Object.keys(pts).length;
+      const rank = [0, 1, 2].map(k => 1 + tot.filter(t => t > tot[k]).length);
+      const fp = v => TMSeason.fmtPts(v);
+      const rows = DP.map((p, k) => `<tr>${'<td>' + name(p) + '</td>'}${scoreTd(p)}${holes.map(h => { const v = pts[h]; if (!v) return `<td class="k">${sc3[k][h] ?? ''}</td>`; const top = v[k] === Math.max(...v); return `<td class="${top ? 'win' : ''}" style="${top ? 'background:color-mix(in srgb, ' + COLORS[p.i % 4] + ' 35%, transparent)' : ''}" title="${sc3[k][h]} Schläge"><b>${fp(v[k])}</b><span class="stk">${sc3[k][h]}</span></td>`; }).join('')}<td class="dst"><span class="big2">${fp(tot[k])}</span> <span class="k">${played ? rank[k] + '. Platz · ' + day[k] + ' Pkt.' : ''}</span></td></tr>`).join('');
+      return `<div class="mp-head"><h2 style="margin:0">Tageswertung · Split Sixes</h2><span class="sub" style="margin:0">pro Loch 4/2/0 Punkte, Gleichstand geteilt · Tagessieger 2, Zweiter 1, Letzter 0 Saisonpunkte${played < nHoles ? ' (vorläufig)' : ''}</span></div>
+        <div style="overflow-x:auto"><table class="dt">${head}${rows}</table></div><p class="sub">Große Zahl = Punkte am Loch, klein = Schläge. Farbig = Bester am Loch.</p>${msg}`;
+    }
+    if (n !== 2 && n !== 4) return `<h2>Tageswertung</h2><p class="sub">Matchplay gibt es bei 2 oder 4 Spielern, Split Sixes bei 3 – diese Runde hat ${n} Spieler.</p>`;
+    let pairs, sel = '';
+    if (n === 2) pairs = [[DP[0].name, DP[1].name]];
+    else {
+      const g = getPairs(sc), names = DP.map(p => p.name), opts = PAIRS(names);
+      pairs = g.pairs && g.pairs.flat().every(x => names.includes(x)) ? g.pairs : null;
+      const idx = pairs ? opts.findIndex(o => pairKey(o) === pairKey(pairs)) : -1;
+      sel = `<label>Paarungen <select id="dayPair"><option value="">– noch nicht festgelegt –</option>${opts.map((o, k) => `<option value="${k}"${k === idx ? ' selected' : ''}>${esc(o[0].join(' – '))} · ${esc(o[1].join(' – '))}</option>`).join('')}</select></label> <button id="dayDraw">Auslosen</button>`;
+    }
+    const byName = nm => DP.find(p => p.name === nm);
+    let rows = '';
+    if (!pairs) rows = DP.map(p => { const o = scoreOf(p); return `<tr><td>${name(p)}</td>${scoreTd(p)}${holes.map(h => `<td>${o[h] ?? ''}</td>`).join('')}<td class="dst"></td></tr>`; }).join('');
+    else pairs.forEach(([an, bn], k) => {
+      const Pa = byName(an), Pb = byName(bn); if (!Pa || !Pb) return;
+      const r = mpCalc(Pa, Pb, nHoles);
+      const cellM = (h, s0, me, col) => { const w = r.res[h] === me; return `<td class="${w ? 'win' : ''}" style="${w ? 'background:color-mix(in srgb, ' + col + ' 35%, transparent)' : ''}">${s0[h] ?? ''}</td>`; };
+      const st = r.st;
+      if (pairs.length > 1) rows += `<tr class="mpsep"><td colspan="${nHoles + 3}">Match ${k + 1}</td></tr>`;
+      rows += `<tr><td>${name(Pa)}</td>${scoreTd(Pa)}${holes.map(h => cellM(h, r.sA, 'A', COLORS[Pa.i % 4])).join('')}<td class="dst">${st.A}</td></tr>
+        <tr><td>${name(Pb)}</td>${scoreTd(Pb)}${holes.map(h => cellM(h, r.sB, 'B', COLORS[Pb.i % 4])).join('')}<td class="dst">${st.B}</td></tr>`;
+    });
+    return `<div class="mp-head"><h2 style="margin:0">Tageswertung · Matchplay</h2><span class="sp"></span>${sel}</div>
+      <div style="overflow-x:auto"><table class="dt">${head}${rows}</table></div>
+      ${!pairs ? '<p class="sub">Paarungen auslosen oder auswählen – dann zeigt die Tabelle die beiden Matches.</p>' : '<p class="sub">Farbig = Loch gewonnen. Sieg 2, Unentschieden 1, Niederlage 0 Saisonpunkte.</p>'}${n === 4 ? seasonHint : ''}${msg}`;
+  }
+  function bindDay(sc, P) {
+    const DP = dayPlayers(P); if (DP.length !== 4) return;
+    const names = DP.map(p => p.name), sel = root.querySelector('#dayPair'), dr = root.querySelector('#dayDraw');
+    if (sel) sel.onchange = () => { if (sel.value === '') return; setPairs(sc, PAIRS(names)[+sel.value]); };
+    if (dr) dr.onclick = () => { if (getPairs(sc).pairs && !confirm('Paarungen neu auslosen? Die bisherigen werden ersetzt.')) return; setPairs(sc, PAIRS(names)[Math.floor(Math.random() * 3)]); };
+  }
+
+  // Matchplay brutto: Loch an den Spieler mit weniger Schlägen, gleich = geteilt
   function mpCalc(A, B, nHoles) {
     const sA = {}, sB = {};
     A.holes.forEach(h => { if (h.complete) sA[h.hole] = h.score; });
     B.holes.forEach(h => { if (h.complete) sB[h.hole] = h.score; });
-    let diff = 0, played = 0, decided = null; const res = {}, stat = {};
+    let diff = 0, played = 0, decided = null; const res = {};
     for (let h = 1; h <= nHoles; h++) {
       if (sA[h] == null || sB[h] == null || decided) continue;
       played++;
       res[h] = sA[h] < sB[h] ? 'A' : sA[h] > sB[h] ? 'B' : 'H';
       diff += res[h] === 'A' ? 1 : res[h] === 'B' ? -1 : 0;
-      stat[h] = diff;
       if (Math.abs(diff) > nHoles - h) decided = { h, left: nHoles - h };
     }
-    const lead = diff > 0 ? A.name : B.name, up = Math.abs(diff), left = nHoles - played;
-    let status;
-    if (!played) status = 'noch kein gemeinsames Loch';
-    else if (decided) status = `${lead} gewinnt ${decided.left ? up + '&' + decided.left : up + ' auf'}`;
-    else if (left === 0) status = diff === 0 ? 'unentschieden' : `${lead} gewinnt ${up} auf`;
-    else if (diff === 0) status = `All Square nach ${played}`;
-    else status = `${lead} ${up} auf nach ${played}${up === left ? ' · Dormie' : ''}`;
-    const cnt = k => Object.values(res).filter(x => x === k).length;
-    return { sA, sB, res, stat, status, done: !!decided || (played > 0 && left === 0), wA: cnt('A'), wB: cnt('B'), hv: cnt('H') };
+    const up = Math.abs(diff), left = nHoles - played, lead = diff > 0 ? 'A' : 'B';
+    const big = t => `<span class="big2">${t}</span>`;
+    const st = { A: '', B: '' };
+    if (!played) { st.A = st.B = '<span class="k">–</span>'; }
+    else if (decided) st[lead] = big(`gewinnt ${decided.left ? up + '&' + decided.left : up + ' up'}`);
+    else if (left === 0) { if (diff === 0) st.A = st.B = big('geteilt'); else st[lead] = big(`gewinnt ${up} up`); }
+    else if (diff === 0) st.A = st.B = big('AS');
+    else st[lead] = big(`${up} up`) + (up === left ? ' <span class="k">Dormie</span>' : '');
+    return { sA, sB, res, st, done: !!decided || (played > 0 && left === 0) };
   }
-  function defaultMatches(names) {
-    const m = [];
-    for (let i = 0; i + 1 < names.length; i += 2) m.push([names[i], names[i + 1]]);
-    return m.length ? m : [];
-  }
-  function matchplay(sc, P) {
-    const names = P.map(p => p.name);
-    let ms = (S.matches || []).filter(([a, b]) => names.includes(a) && names.includes(b) && a !== b);
-    if (!ms.length) ms = defaultMatches(names);
-    S.matches = ms;
-    const nHoles = Math.max(...sc.playersScorecards.map(ps => Math.max(0, ...ps.holes.map(h => h.holeNumber))), 9) > 9 ? 18 : 9;
-    const par = {}; sc.playersScorecards.forEach(ps => ps.holes.forEach(h => { if (par[h.holeNumber] == null) par[h.holeNumber] = h.par; }));
-    const holes = Array.from({ length: nHoles }, (_, i) => i + 1);
-    const ab = n => n.replace(/[^A-Za-zÄÖÜäöüß0-9]/g, '').slice(0, 4);
-    const opt = (sel, other) => names.map(n => `<option value="${n.replace(/"/g, '&quot;')}"${n === sel ? ' selected' : ''}${n === other ? ' disabled' : ''}>${n}</option>`).join('');
-    let rows = '';
-    const heads = ms.map(([an, bn], k) => {
-      const ia = names.indexOf(an), ib = names.indexOf(bn), A = P[ia], B = P[ib];
-      const colA = COLORS[ia % 4], colB = COLORS[ib % 4];
-      const r = mpCalc(A, B, nHoles);
-      const cell = (h, sc0, me, col) => { const w = r.res[h] === me; return `<td class="${w ? 'win' : ''}" style="${w ? 'background:color-mix(in srgb, ' + col + ' 35%, transparent)' : ''}">${sc0[h] ?? ''}</td>`; };
-      const st = h => r.stat[h] == null ? '' : r.stat[h] === 0 ? 'AS' : `<span style="white-space:nowrap;color:var(--text)"><span class="dot" style="width:7px;height:7px;background:${r.stat[h] > 0 ? colA : colB}"></span> ${ab(r.stat[h] > 0 ? A.name : B.name)} ${Math.abs(r.stat[h])}</span>`;
-      rows += `<tr class="mpsep"><td colspan="${nHoles + 1}"><b>Match ${k + 1}:</b> ${A.name} – ${B.name} · <b>${r.status}</b></td></tr>
-        <tr><td><span class="dot" style="background:${colA}"></span> ${A.name}</td>${holes.map(h => cell(h, r.sA, 'A', colA)).join('')}</tr>
-        <tr><td><span class="dot" style="background:${colB}"></span> ${B.name}</td>${holes.map(h => cell(h, r.sB, 'B', colB)).join('')}</tr>
-        <tr><td class="k">Stand</td>${holes.map(h => `<td class="k">${st(h)}</td>`).join('')}</tr>`;
-      return `<div class="mp-row"><span class="mp-n">Match ${k + 1}</span>
-        <select data-m="${k}" data-s="0">${opt(an, bn)}</select><span class="k">gegen</span><select data-m="${k}" data-s="1">${opt(bn, an)}</select>
-        <span class="mp-status${r.done ? ' fin' : ''}">${r.status}</span><span class="k">gewonnen ${r.wA}:${r.wB}, geteilt ${r.hv}</span>
-        <button class="mp-del" data-m="${k}" title="Match entfernen">✕</button></div>`;
-    }).join('');
-    return `<div class="mp-head"><h2 style="margin:0">Matchplay (brutto)</h2><span class="sp"></span>
-        <button id="mpAdd">+ Match</button>${names.length > 2 ? '<button id="mpAll">Jeder gegen jeden</button>' : ''}${names.length >= 4 ? '<button id="mpPairs">Paarungen 1–2, 3–4</button>' : ''}</div>
-      ${heads || '<p class="sub">Kein Match angelegt.</p>'}
-      ${ms.length ? `<div style="overflow-x:auto;margin-top:10px"><table><tr><th>Loch</th>${holes.map(h => `<th>${h}</th>`).join('')}</tr><tr><td class="k">Par</td>${holes.map(h => `<td class="k">${par[h] ?? ''}</td>`).join('')}</tr>${rows}</table></div>` : ''}
-      <p class="sub" style="margin-top:8px">Brutto: Das Loch gewinnt, wer weniger Schläge braucht, bei Gleichstand ist es geteilt (keine Vorgaben). Gewertet werden nur Löcher, die beide fertig gespielt haben. „Stand“: wer nach dem Loch wie viele Löcher vorne liegt, AS = All Square (Gleichstand). Entschieden ist ein Match, sobald der Vorsprung größer ist als die verbleibenden Löcher (z. B. 3&2 = 3 auf, 2 übrig).</p>`;
-  }
-  function bindMatchplay(P) {
-    const names = P.map(p => p.name), save = () => { store.set({ matches: S.matches }); render(); };
-    root.querySelectorAll('#mp select[data-m]').forEach(el => el.onchange = () => { S.matches[+el.dataset.m][+el.dataset.s] = el.value; save(); });
-    root.querySelectorAll('#mp .mp-del').forEach(el => el.onclick = () => { S.matches.splice(+el.dataset.m, 1); if (!S.matches.length) S.matches = [[names[0], names[1]]]; save(); });
-    const add = root.querySelector('#mpAdd'); if (add) add.onclick = () => {
-      const used = new Set(S.matches.map(m => m.slice().sort().join('|')));
-      let pick = null; for (let i = 0; i < names.length && !pick; i++) for (let j = i + 1; j < names.length && !pick; j++) if (!used.has([names[i], names[j]].sort().join('|'))) pick = [names[i], names[j]];
-      S.matches.push(pick || [names[0], names[1]]); save(); };
-    const all = root.querySelector('#mpAll'); if (all) all.onclick = () => { S.matches = []; for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) S.matches.push([names[i], names[j]]); save(); };
-    const pr = root.querySelector('#mpPairs'); if (pr) pr.onclick = () => { S.matches = defaultMatches(names); save(); };
+
+  function seasonMiniHTML() {
+    if (!SE.season) return `<h2>Saisonstand</h2><p class="sub">${sstore.get().pw ? (SE.msg ? esc(SE.msg) : 'Lade Saison …') : 'Für den Saisonstand einmal unter „Saison verwalten“ das Saison-Passwort eingeben.'}</p>`;
+    const R = TMSeason.compute(SE.season);
+    return `<div class="mp-head"><h2 style="margin:0">Saisonstand · ${esc(SE.season.config.name || '')}</h2><span class="sp"></span><span class="sub" style="margin:0">${R.included.length} ${R.included.length === 1 ? 'Runde' : 'Runden'}${S.data && S.data.state === 'IN_PROGRESS' ? ' · die laufende Runde kommt nach Rundenende dazu' : ''}</span><button id="goSeason">Details und Pflege</button></div>
+      ${TMSeason.standingsHTML(R, { compact: true, noTitles: true })}`;
   }
 
   function drawRace(P) {
@@ -742,7 +795,7 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
     if (ls) ls.onchange = () => { S.liveShot = ls.checked; renderDetail(); };
   }
   document.addEventListener('keydown', e => {
-    if (!visible || !A || S.view === 'season') return;
+    if (!visible || !A || S.view !== 'shots') return;
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { const b = root.querySelector(e.key === 'ArrowLeft' ? '#prev' : '#next'); if (b && !b.disabled) { b.click(); e.preventDefault(); } }
   });
 
@@ -799,7 +852,9 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
       const round = { id: sc.id, date: sc.startedAt, updated: sc.lastUpdatedAt, course: sc.course.displayName.trim(), tee: sc.teeName, holeNos: nos, par: nos.map(parOf),
         players: ps.map(p => ({ name: p.player.name, tee: p.teeName || sc.teeName, scores: nos.map(n => { const h = p.holes.find(x => x.holeNumber === n); return h && h.grossScore != null ? h.grossScore : null; }) })) };
       if (round.players.length < 2) continue;
-      if (ex) { round.include = ex.include; round.pairings = ex.pairings; Object.assign(ex, round); updated++; } else { SE.season.rounds.push(round); added++; }
+      const pre = (SE.season.pairings || {})[s.id];
+      if (ex) { round.include = ex.include; round.pairings = ex.pairings || pre; Object.assign(ex, round); updated++; } else { if (pre) round.pairings = pre; SE.season.rounds.push(round); added++; }
+      if (pre && SE.season.pairings) delete SE.season.pairings[s.id];
     }
     if (added || updated) SE.dirty = true;
     return { added, updated, checked: list.length };
@@ -818,7 +873,6 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
     await seasonRun(async () => { await seasonLoad(); return await seasonSync(); }, m => m.added || m.updated ? `${m.added} neue, ${m.updated} geänderte Runde(n) aus dem Portal übernommen – bitte speichern.` : 'Aktuell: keine neuen Runden im Portal.');
     if (SE.dirty && sstore.get().gh && SE.season && SE.season.rounds.length && SE.sha) await seasonRun(seasonSave, 'Neue Runden übernommen und gespeichert.');
   }
-  const PAIRS = n => [[[n[0], n[1]], [n[2], n[3]]], [[n[0], n[2]], [n[1], n[3]]], [[n[0], n[3]], [n[1], n[2]]]];
   function renderSeason() {
     main.querySelectorAll('details.rd[data-id]').forEach(d => d.open ? SE.openIds.add(d.dataset.id) : SE.openIds.delete(d.dataset.id));
     const cfg = sstore.get();
@@ -873,11 +927,34 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
   }
 
   // ---------------- Steuerung ----------------
-  $('#seasonBtn').onclick = () => {
-    S.view = S.view === 'season' ? 'live' : 'season'; $('#seasonBtn').classList.toggle('on', S.view === 'season');
-    ['#round', '#replayL', '#rp'].forEach(q => $(q).style.visibility = S.view === 'season' ? 'hidden' : '');
-    if (S.view === 'season') { if (SE.dirty) renderSeason(); else seasonOpen(); } else render();
-  };
+  function setTab(t) {
+    S.view = t; store.set({ tab: t });
+    root.querySelectorAll('.vtabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+    ['#round', '#replayL', '#rp'].forEach(q => $(q).style.visibility = t === 'season' ? 'hidden' : '');
+    main.scrollTop = 0;
+    if (t === 'season') { if (SE.dirty || SE.busy) renderSeason(); else seasonOpen(); } else render();
+  }
+  root.querySelectorAll('.vtabs button').forEach(b => b.onclick = () => setTab(b.dataset.tab));
+  // Saison im Hintergrund laden (für Übersicht und Paarungen)
+  async function seasonBackground() {
+    if (!sstore.get().pw || SE.season || SE.busy) return;
+    try { await seasonLoad(); } catch (e) { SE.msg = e.message === 'DECRYPT' ? 'Das Saison-Passwort passt nicht zur Datei.' : 'Saison konnte nicht geladen werden: ' + e.message; }
+    if (S.view === 'overview') render();
+    seasonAuto();
+  }
+  // Nach Rundenende die Runde automatisch in die Saison übernehmen (mit Token gleich speichern)
+  async function seasonAuto() {
+    const sc = S.data;
+    if (!SE.season || SE.busy || SE.dirty || !sc || sc.state !== 'COMPLETED' || S.replay) return;
+    if ((SE.season.rounds || []).some(r => r.id === sc.id) || S.autoSynced.has(sc.id)) return;
+    S.autoSynced.add(sc.id); SE.busy = true;
+    try {
+      const m = await seasonSync();
+      if (m.added && sstore.get().gh) { await seasonSave(); S.dayMsg = 'Runde in die Saisonwertung übernommen und gespeichert.'; }
+      else if (m.added) S.dayMsg = 'Runde in die Saisonwertung übernommen – zum Speichern fehlt der GitHub-Token (Saison verwalten).';
+    } catch (e) { S.dayMsg = 'Saison: ' + e.message; }
+    SE.busy = false; if (S.view === 'overview') render();
+  }
   $('#round').onchange = () => { S.id = $('#round').value; S.follow = false; $('#follow').checked = false; S.sel = 0; S.liveShot = true; store.set({ id: S.id, follow: false }); refresh(); };
   $('#follow').onchange = () => { S.follow = $('#follow').checked; store.set({ follow: S.follow }); if (S.follow) refresh(); };
   $('#now').onclick = () => refresh();
@@ -898,7 +975,8 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
   function schedule() { clearInterval(timer); if (!S.paused) timer = setInterval(() => { if (visible && !document.hidden) refresh(); }, S.ival * 1000); }
   window.addEventListener('resize', () => { if (visible && A) render(); });
 
-  if (S.data) render();
+  setTab(S.view === 'season' ? 'overview' : S.view);
+  seasonBackground();
   await refresh();
   schedule();
 })();
