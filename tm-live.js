@@ -368,7 +368,12 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
   .dt .dsc { text-align:right; min-width:78px; padding-right:12px; } .dt .dst { text-align:left; min-width:150px; padding-left:14px; }
   .dt .par td { color:var(--t2); font-size:12px; } .dt .win { font-weight:700; border-radius:6px; }
   .dt .mpsep td { text-align:left; color:var(--t2); font-size:12px; background:var(--surface); padding-top:8px; }
-  .big2 { font-size:18px; font-weight:650; } .stk { display:block; font-size:10px; color:var(--t2); font-weight:400; line-height:1; }
+  .big2 { font-size:18px; font-weight:650; }
+  .mk { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; box-sizing:border-box; font-weight:500; line-height:1; }
+  .mk.mk-s { width:20px; height:20px; font-size:11px; } .dt .mk-s { margin-top:2px; }
+  .m-bir { border:1px solid currentColor; border-radius:50%; } .m-eag { border:3px double currentColor; border-radius:50%; }
+  .m-bog { border:1px solid currentColor; } .m-dbl { border:3px double currentColor; }
+  .spp { display:block; font-size:15px; line-height:1.1; } .dt td .mk-s { display:inline-flex; }
   .dmsg { color:var(--text); background:var(--hl); padding:4px 8px; border-radius:6px; display:inline-block; }
   .sed { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; margin:8px 0; padding:8px 10px; background:var(--surface); border:1px solid var(--line); border-radius:8px; }
   .sed label, .sub input { font-size:13px; } input[type=password], input[type=date], #sparts { font:inherit; font-size:13px; padding:3px 6px; border-radius:6px; border:1px solid var(--line); background:var(--surface); color:var(--text); }
@@ -379,7 +384,7 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
   </style>
   <div class="w">
     <div class="top">
-      <h1>Trackman Live <span style="font-weight:400;font-size:12px;color:var(--t2)">v1.8</span></h1>
+      <h1>Trackman Live <span style="font-weight:400;font-size:12px;color:var(--t2)">v1.8.1</span></h1>
       <span class="vtabs"><button data-tab="overview">Übersicht</button><button data-tab="shots">Schlagdaten</button><button data-tab="season">Saison verwalten</button></span>
       <select id="round" title="Runde"></select>
       <label><input type="checkbox" id="follow" checked> neueste Runde folgen</label>
@@ -653,10 +658,12 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
     const nHoles = Math.max(...sc.playersScorecards.map(ps => Math.max(0, ...ps.holes.map(h => h.holeNumber))), 9) > 9 ? 18 : 9;
     const holes = Array.from({ length: nHoles }, (_, i) => i + 1);
     const par = {}; sc.playersScorecards.forEach(ps => ps.holes.forEach(h => { if (par[h.holeNumber] == null) par[h.holeNumber] = h.par; }));
+    const mk = (v, h, small) => { if (v == null) return ''; const d = par[h] ? v - par[h] : 0; const c = d <= -2 ? 'm-eag' : d === -1 ? 'm-bir' : d === 1 ? 'm-bog' : d >= 2 ? 'm-dbl' : 'm-par'; return `<span class="mk ${c}${small ? ' mk-s' : ''}">${v}</span>`; };
     const scoreOf = p => { const o = {}; p.holes.forEach(h => { if (h.complete) o[h.hole] = h.score; }); return o; };
     const name = p => `<span class="dot" style="background:${COLORS[p.i % 4]}"></span> ${esc(p.name)}`;
     const scoreTd = p => `<td class="dsc">${p.thru ? `<b>${toPar(p.toPar)}</b> <span class="k">${p.thru < nHoles ? p.thru + ' L.' : p.score}</span>` : '–'}</td>`;
     const head = `<tr><th>Spieler</th><th class="dsc">Score</th>${holes.map(h => `<th>${h}</th>`).join('')}<th class="dst">Stand</th></tr><tr class="par"><td class="k">Par</td><td></td>${holes.map(h => `<td class="k">${par[h] ?? ''}</td>`).join('')}<td></td></tr>`;
+    const LEG = `Zeichen: <span class="mk m-eag mk-s">3</span> Eagle oder besser, <span class="mk m-bir mk-s">3</span> Birdie, <span class="mk m-par mk-s">4</span> Par, <span class="mk m-bog mk-s">5</span> Bogey, <span class="mk m-dbl mk-s">6</span> Doppelbogey oder schlechter.`;
     const msg = S.dayMsg ? `<p class="sub dmsg">${esc(S.dayMsg)}</p>` : '';
     const seasonHint = !SE.season ? `<p class="sub">Saison nicht geladen – Paarungen gelten nur in diesem Browser. Unter „Saison verwalten“ das Saison-Passwort eingeben.</p>` : '';
     if (n === 3) {
@@ -665,9 +672,10 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
       const day = TMSeason.dayPointsSplit(tot), played = Object.keys(pts).length;
       const rank = [0, 1, 2].map(k => 1 + tot.filter(t => t > tot[k]).length);
       const fp = v => TMSeason.fmtPts(v);
-      const rows = DP.map((p, k) => `<tr>${'<td>' + name(p) + '</td>'}${scoreTd(p)}${holes.map(h => { const v = pts[h]; if (!v) return `<td class="k">${sc3[k][h] ?? ''}</td>`; const top = v[k] === Math.max(...v); return `<td class="${top ? 'win' : ''}" style="${top ? 'background:color-mix(in srgb, ' + COLORS[p.i % 4] + ' 35%, transparent)' : ''}" title="${sc3[k][h]} Schläge"><b>${fp(v[k])}</b><span class="stk">${sc3[k][h]}</span></td>`; }).join('')}<td class="dst"><span class="big2">${fp(tot[k])}</span> <span class="k">${played ? rank[k] + '. Platz · ' + day[k] + ' Pkt.' : ''}</span></td></tr>`).join('');
+      const order = [0, 1, 2].sort((a, b) => tot[b] - tot[a] || a - b);
+      const rows = order.map(k => [DP[k], k]).map(([p, k]) => `<tr>${'<td>' + name(p) + '</td>'}${scoreTd(p)}${holes.map(h => { const v = pts[h]; if (!v) return `<td>${mk(sc3[k][h], h)}</td>`; const top = v[k] === Math.max(...v); return `<td class="${top ? 'win' : ''}" style="${top ? 'background:color-mix(in srgb, ' + COLORS[p.i % 4] + ' 35%, transparent)' : ''}" title="${sc3[k][h]} Schläge, ${fp(v[k])} Punkte"><b class="spp">${fp(v[k])}</b>${mk(sc3[k][h], h, true)}</td>`; }).join('')}<td class="dst"><span class="big2">${fp(tot[k])}</span> <span class="k">${played ? rank[k] + '. Platz · ' + day[k] + ' Pkt.' : ''}</span></td></tr>`).join('');
       return `<div class="mp-head"><h2 style="margin:0">Tageswertung · Split Sixes</h2><span class="sub" style="margin:0">pro Loch 4/2/0 Punkte, Gleichstand geteilt · Tagessieger 2, Zweiter 1, Letzter 0 Saisonpunkte${played < nHoles ? ' (vorläufig)' : ''}</span></div>
-        <div style="overflow-x:auto"><table class="dt">${head}${rows}</table></div><p class="sub">Große Zahl = Punkte am Loch, klein = Schläge. Farbig = Bester am Loch.</p>${msg}`;
+        <div style="overflow-x:auto"><table class="dt">${head}${rows}</table></div><p class="sub">Oben Punkte am Loch, darunter die Schläge. In Spielerfarbe = meiste Punkte am Loch. Sortiert nach aktuellem Punktestand. ${LEG}</p>${msg}`;
     }
     if (n !== 2 && n !== 4) return `<h2>Tageswertung</h2><p class="sub">Matchplay gibt es bei 2 oder 4 Spielern, Split Sixes bei 3 – diese Runde hat ${n} Spieler.</p>`;
     let pairs, sel = '';
@@ -680,11 +688,11 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
     }
     const byName = nm => DP.find(p => p.name === nm);
     let rows = '';
-    if (!pairs) rows = DP.map(p => { const o = scoreOf(p); return `<tr><td>${name(p)}</td>${scoreTd(p)}${holes.map(h => `<td>${o[h] ?? ''}</td>`).join('')}<td class="dst"></td></tr>`; }).join('');
+    if (!pairs) rows = DP.map(p => { const o = scoreOf(p); return `<tr><td>${name(p)}</td>${scoreTd(p)}${holes.map(h => `<td>${mk(o[h], h)}</td>`).join('')}<td class="dst"></td></tr>`; }).join('');
     else pairs.forEach(([an, bn], k) => {
       const Pa = byName(an), Pb = byName(bn); if (!Pa || !Pb) return;
       const r = mpCalc(Pa, Pb, nHoles);
-      const cellM = (h, s0, me, col) => { const w = r.res[h] === me; return `<td class="${w ? 'win' : ''}" style="${w ? 'background:color-mix(in srgb, ' + col + ' 35%, transparent)' : ''}">${s0[h] ?? ''}</td>`; };
+      const cellM = (h, s0, me, col) => { const w = r.res[h] === me; return `<td class="${w ? 'win' : ''}" style="${w ? 'background:color-mix(in srgb, ' + col + ' 35%, transparent)' : ''}">${mk(s0[h], h)}</td>`; };
       const st = r.st;
       if (pairs.length > 1) rows += `<tr class="mpsep"><td colspan="${nHoles + 3}">Match ${k + 1}</td></tr>`;
       rows += `<tr><td>${name(Pa)}</td>${scoreTd(Pa)}${holes.map(h => cellM(h, r.sA, 'A', COLORS[Pa.i % 4])).join('')}<td class="dst">${st.A}</td></tr>
@@ -692,7 +700,7 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
     });
     return `<div class="mp-head"><h2 style="margin:0">Tageswertung · Matchplay</h2><span class="sp"></span>${sel}</div>
       <div style="overflow-x:auto"><table class="dt">${head}${rows}</table></div>
-      ${!pairs ? '<p class="sub">Paarungen auslosen oder auswählen – dann zeigt die Tabelle die beiden Matches.</p>' : '<p class="sub">Farbig = Loch gewonnen. Sieg 2, Unentschieden 1, Niederlage 0 Saisonpunkte.</p>'}${n === 4 ? seasonHint : ''}${msg}`;
+      ${!pairs ? '<p class="sub">Paarungen auslosen oder auswählen – dann zeigt die Tabelle die beiden Matches.</p>' : `<p class="sub">In Spielerfarbe = Loch gewonnen. Sieg 2, Unentschieden 1, Niederlage 0 Saisonpunkte. ${LEG}</p>`}${n === 4 ? seasonHint : ''}${msg}`;
   }
   function bindDay(sc, P) {
     const DP = dayPlayers(P); if (DP.length !== 4) return;
