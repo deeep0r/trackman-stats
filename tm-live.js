@@ -331,7 +331,9 @@ var TMSeason = (function () {
 if (typeof module !== 'undefined') module.exports = TMSeason;
 (async () => {
   if (window.__tmLive) { window.__tmLive.toggle(); return; }
-  if (!/portal\.trackmangolf\.com$/.test(location.hostname)) { alert('Bitte zuerst portal.trackmangolf.com öffnen und anmelden, dann den Knopf erneut klicken.'); return; }
+  // Seit 11/2026 blockiert das Portal fremde Skripte. Live läuft deshalb als eigene Seite (live.html);
+  // die Anmeldung kommt über das Portal-Lesezeichen im Link (#t=…) und wird hier gespeichert (gilt ca. 7 Tage).
+  const STANDALONE = !/portal\.trackmangolf\.com$/.test(location.hostname);
   const API = 'https://api.trackmangolf.com/graphql';
   const MPH = 2.23694;
   const LS = 'tmLive:v1';
@@ -435,11 +437,11 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
   </style>
   <div class="w">
     <div class="top">
-      <h1>Trackman Live <span style="font-weight:400;font-size:12px;color:var(--t2)">v1.10</span></h1>
+      <h1>Trackman Live <span style="font-weight:400;font-size:12px;color:var(--t2)">v1.11</span></h1>
       <span class="vtabs"><button data-tab="overview">Übersicht</button><button data-tab="shots">Schlagdaten</button><button data-tab="season">Saison verwalten</button></span>
       <select id="round" title="Runde"></select>
       <label title="Immer die neueste Runde anzeigen"><input type="checkbox" id="follow" checked> neueste</label>
-      <span class="meta" id="meta"></span>
+      <span class="meta" id="meta"></span><span class="meta" id="authInfo"></span>
       <span class="sp"></span>
       <label id="replayL"><input type="checkbox" id="replay"> Replay</label>
       <span class="rp" id="rp"><button id="rpPlay">▶</button><input type="range" id="rpPos" min="0" max="0" value="0"><span class="meta" id="rpTxt"></span></span>
@@ -461,17 +463,34 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
   const gq = async (token, query, variables = {}) => {
     const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify({ query, variables }) });
     if (r.status === 401 || r.status === 403) throw new Error('AUTH');
-    return r.json();
+    const j = await r.json();
+    if (j && j.errors && j.errors.some(e => e.extensions && /AUTH_NOT_AUTHENTICATED|AUTH_NOT_AUTHORIZED/.test(e.extensions.code || '')) && !j.data?.me && !j.data?.node) throw new Error('AUTH');
+    return j;
   };
   const works = async (t) => { try { const r = await gq(t, '{ me { profile { fullName } } }'); return r && r.data && r.data.me ? r.data.me.profile : null; } catch (e) { return null; } };
   let token = null;
-  {
+  const TK = 'tmLive:token';
+  const jwtExp = (t) => { try { return JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).exp * 1000 || 0; } catch (e) { return 0; } };
+  const LOGIN_HELP = '<b>Anmeldung fehlt oder ist abgelaufen.</b><br>So geht es: <a href="https://portal.trackmangolf.com" target="_blank" rel="noopener">portal.trackmangolf.com</a> öffnen und anmelden, dort das Lesezeichen <b>Trackman Live</b> klicken und im Kasten auf <b>„Trackman Live öffnen“</b>. Die Anmeldung gilt dann rund 7 Tage.';
+  if (STANDALONE) {
+    const m = /[#&]t=([^&]+)/.exec(location.hash);
+    if (m) { token = decodeURIComponent(m[1]); try { localStorage.setItem(TK, token); } catch (e) {} history.replaceState(null, '', location.pathname + location.search); }
+    if (!token) { try { token = localStorage.getItem(TK); } catch (e) {} }
+    if (token && jwtExp(token) && jwtExp(token) < Date.now() + 60000) token = null;
+    if (token && !(await works(token))) token = null;
+    if (!token) { main.innerHTML = '<div class="msg">' + LOGIN_HELP + '</div>'; window.__tmLive = { toggle() {} }; return; }
+    const ex = jwtExp(token);
+    if (ex) $('#authInfo').textContent = 'Anmeldung gültig bis ' + new Date(ex).toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    $('#close').style.display = 'none';
+    document.title = 'Trackman Live';
+  }
+  if (!token) {
     const re = /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, cands = new Set();
     for (const s of [localStorage, sessionStorage]) { try { for (let i = 0; i < s.length; i++) ((s.getItem(s.key(i)) || '').match(re) || []).forEach(x => cands.add(x)); } catch (e) {} }
     (document.cookie.match(re) || []).forEach(x => cands.add(x));
     for (const c of cands) if (await works(c)) { token = c; break; }
   }
-  if (!token) {
+  if (!token && !STANDALONE) {
     host.style.display = 'none';
     const box = document.createElement('div');
     box.style.cssText = 'position:fixed;top:16px;right:16px;z-index:2147483647;background:#1d1d1f;color:#fff;font:14px/1.4 system-ui,sans-serif;padding:14px 16px;border-radius:10px;max-width:340px;box-shadow:0 6px 24px rgba(0,0,0,.35)';
@@ -542,7 +561,7 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
   async function refresh() {
     if (busy) return; busy = true; S.err = '';
     try { await loadList(); await loadRound(); }
-    catch (e) { S.err = e.message === 'AUTH' ? 'Anmeldung abgelaufen – Portal neu laden, anmelden und den Knopf erneut klicken.' : 'Aktualisierung fehlgeschlagen: ' + e.message; }
+    catch (e) { S.err = e.message === 'AUTH' ? (STANDALONE ? 'Anmeldung abgelaufen: im Portal anmelden, Lesezeichen „Trackman Live“ klicken und „Trackman Live öffnen“ wählen.' : 'Anmeldung abgelaufen – Portal neu laden, anmelden und den Knopf erneut klicken.') : 'Aktualisierung fehlgeschlagen: ' + e.message; }
     busy = false; if (S.view !== 'season') render(); seasonAuto();
   }
 
@@ -977,7 +996,7 @@ if (typeof module !== 'undefined') module.exports = TMSeason;
     if (SE.busy) return; SE.busy = true; SE.msg = 'Arbeite …'; renderSeason();
     try { const m = await fn(); SE.msg = typeof okMsg === 'function' ? okMsg(m) : okMsg || ''; }
     catch (e) {
-      SE.msg = e.message === 'PW' ? '' : e.message === 'DECRYPT' ? 'Das Saison-Passwort passt nicht zur Datei.' : e.message === 'AUTH' ? 'Anmeldung im Portal abgelaufen – Portal neu laden.' : e.message;
+      SE.msg = e.message === 'PW' ? '' : e.message === 'DECRYPT' ? 'Das Saison-Passwort passt nicht zur Datei.' : e.message === 'AUTH' ? 'Anmeldung abgelaufen – im Portal das Lesezeichen „Trackman Live“ erneut klicken.' : e.message;
       if (e.message === 'DECRYPT') sstore.set({ pw: '' });
     }
     SE.busy = false; renderSeason();

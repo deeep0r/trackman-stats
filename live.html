@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Trackman Live</title>
+<style>html,body{margin:0;background:#f5f5f7}@media (prefers-color-scheme:dark){html,body{background:#111}}</style>
+</head>
+<body>
+<script>
+  var s = document.createElement('script');
+  s.src = 'tm-live.js?v=' + Date.now();
+  s.onerror = function () { document.body.innerHTML = '<p style="font:15px system-ui;padding:24px">Trackman Live konnte nicht geladen werden. Bitte Seite neu laden.</p>'; };
+  document.body.appendChild(s);
+  window.addEventListener('hashchange', function () { if (/[#&]t=/.test(location.hash)) location.reload(); });
+</script>
+</body>
+</html>
